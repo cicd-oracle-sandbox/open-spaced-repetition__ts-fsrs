@@ -1,0 +1,31 @@
+# @open-spaced-repetition/srs-kit
+
+## 1.0.1
+
+### Patch Changes
+
+- [#601](https://github.com/open-spaced-repetition/ts-fsrs/pull/601) [`e74ffc7`](https://github.com/open-spaced-repetition/ts-fsrs/commit/e74ffc7c944e8772fc3705d44723453ccb6d7fd0) Thanks [@ishiko732](https://github.com/ishiko732)! - feat: support deeper chained `use()` without TS2589.
+
+- [#601](https://github.com/open-spaced-repetition/ts-fsrs/pull/601) [`e74ffc7`](https://github.com/open-spaced-repetition/ts-fsrs/commit/e74ffc7c944e8772fc3705d44723453ccb6d7fd0) Thanks [@ishiko732](https://github.com/ishiko732)! - feat: expand `newCard` and `DefaultScheduler` options in editor hovers.
+
+## 1.0.0
+
+First stable release of the model-independent SRS framework, licensed under BSD-3-Clause. FSRS algorithms and FSRS-specific scheduling policies are provided by `ts-fsrs`. ([#418](https://github.com/open-spaced-repetition/ts-fsrs/pull/418)) Thanks [@ishiko732](https://github.com/ishiko732)!
+
+### Runtime Requirements
+
+- Support Node.js 20 or later with ESM and CommonJS entries. Temporal support is optional: using the numeric or Date preset does not require a polyfill. To use `temporalInstantChrono`, use native `globalThis.Temporal` when available, or install `temporal-polyfill` and load `import 'temporal-polyfill/global'` before using the preset. ([#418](https://github.com/open-spaced-repetition/ts-fsrs/pull/418), [#390](https://github.com/open-spaced-repetition/ts-fsrs/pull/390)) Thanks [@ishiko732](https://github.com/ishiko732)!
+
+### Features
+
+- Provide Standard Schema-compatible validation helpers, rating/state/schedule-status primitives, and `defineModel` contracts for memory states, algorithm access, configuration, migration, clipping, and validation. ([#389](https://github.com/open-spaced-repetition/ts-fsrs/pull/389), [#393](https://github.com/open-spaced-repetition/ts-fsrs/pull/393), [#398](https://github.com/open-spaced-repetition/ts-fsrs/pull/398), [#425](https://github.com/open-spaced-repetition/ts-fsrs/pull/425), [#464](https://github.com/open-spaced-repetition/ts-fsrs/pull/464), [#492](https://github.com/open-spaced-repetition/ts-fsrs/pull/492)) Thanks [@ishiko732](https://github.com/ishiko732)!
+- Provide `defineChrono` with numeric-day, `Date`, and `Temporal.Instant` presets, shared fractional-day configuration, card/revlog time normalization, and optional precise comparison. Review logs preserve the previous review time, original due date, and current review time for rollback. ([#390](https://github.com/open-spaced-repetition/ts-fsrs/pull/390), [#435](https://github.com/open-spaced-repetition/ts-fsrs/pull/435), [#519](https://github.com/open-spaced-repetition/ts-fsrs/pull/519), [#522](https://github.com/open-spaced-repetition/ts-fsrs/pull/522), [#525](https://github.com/open-spaced-repetition/ts-fsrs/pull/525)) Thanks [@ishiko732](https://github.com/ishiko732) and [@Eijnewgnaw](https://github.com/Eijnewgnaw)!
+- Provide `defineScheduler` and `CustomScheduler` for card initialization, preview, review, rollback, forget, retrievability, and history forwarding. `newCard({ now, ...fields })` supports middleware-defined initialization fields; forget behavior is configurable. Preview results support grade lookup, iteration, and mapping to arrays. ([#397](https://github.com/open-spaced-repetition/ts-fsrs/pull/397), [#404](https://github.com/open-spaced-repetition/ts-fsrs/pull/404), [#408](https://github.com/open-spaced-repetition/ts-fsrs/pull/408), [#409](https://github.com/open-spaced-repetition/ts-fsrs/pull/409), [#471](https://github.com/open-spaced-repetition/ts-fsrs/pull/471), [#569](https://github.com/open-spaced-repetition/ts-fsrs/pull/569)) Thanks [@ishiko732](https://github.com/ishiko732)!
+- Support `nextInterval` queries and per-grade desired retention through the shared interval middleware pipeline. ([#526](https://github.com/open-spaced-repetition/ts-fsrs/pull/526), [#527](https://github.com/open-spaced-repetition/ts-fsrs/pull/527)) Thanks [@ishiko732](https://github.com/ishiko732)!
+- Provide `defineMiddleware`, immutable scheduler middleware composition, `runMiddlewares`, and `schedulerStatsMiddleware`. Middleware handlers can access the scheduler instance and the input card's retrievability during review. ([#396](https://github.com/open-spaced-repetition/ts-fsrs/pull/396), [#423](https://github.com/open-spaced-repetition/ts-fsrs/pull/423), [#460](https://github.com/open-spaced-repetition/ts-fsrs/pull/460), [#566](https://github.com/open-spaced-repetition/ts-fsrs/pull/566), [#569](https://github.com/open-spaced-repetition/ts-fsrs/pull/569)) Thanks [@ishiko732](https://github.com/ishiko732)!
+
+### Correctness and Type Inference
+
+- Restore new-card chronology and state on rollback while keeping elapsed days at zero. ([#453](https://github.com/open-spaced-repetition/ts-fsrs/pull/453), [#466](https://github.com/open-spaced-repetition/ts-fsrs/pull/466)) Thanks [@ishiko732](https://github.com/ishiko732)!
+- Infer middleware card initialization fields and flatten scheduler config, card, and revlog types; avoid TypeScript TS2590 errors in scheduler inference. ([#450](https://github.com/open-spaced-repetition/ts-fsrs/pull/450), [#493](https://github.com/open-spaced-repetition/ts-fsrs/pull/493), [#495](https://github.com/open-spaced-repetition/ts-fsrs/pull/495), [#503](https://github.com/open-spaced-repetition/ts-fsrs/pull/503), [#423](https://github.com/open-spaced-repetition/ts-fsrs/pull/423)) Thanks [@ishiko732](https://github.com/ishiko732)!
+- Cache middleware validation schemas and harden record merging and card defaults. ([#442](https://github.com/open-spaced-repetition/ts-fsrs/pull/442), [#551](https://github.com/open-spaced-repetition/ts-fsrs/pull/551)) Thanks [@ishiko732](https://github.com/ishiko732)!

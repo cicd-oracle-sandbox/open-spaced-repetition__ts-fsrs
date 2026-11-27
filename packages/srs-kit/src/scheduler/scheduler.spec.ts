@@ -1,0 +1,1061 @@
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import { defineChrono } from '@/chrono/define-chrono.js'
+import { dateChrono } from '@/chrono/presets/date/chrono.js'
+import { temporalInstantChrono } from '@/chrono/presets/temporal-instant/chrono.js'
+import { defineMiddleware } from '@/middleware/index.js'
+import { schedulerStatsMiddleware } from '@/middleware/stats/index.js'
+import { SM2Model } from '@/model/sm2.test.js'
+import { type Grade, Rating, State } from '@/primitives/index.js'
+import {
+  defineSchema,
+  fractionalDaysConfigSchema,
+  isObject,
+  numberSchema,
+  type SRSSchema,
+  type StandardSchemaV1,
+} from '@/schema/index.js'
+import { defineScheduler } from './define-scheduler.js'
+import type {
+  ExtendSchedulerEnv,
+  SchedulerCardInitInputOf,
+  SchedulerCardInputOf,
+  SchedulerCardOf,
+  SchedulerConfigOf,
+  SchedulerEnvFor,
+  SchedulerRevlogInputOf,
+  SchedulerRevlogOf,
+  SchedulerStatusOf,
+  SchedulerTimeOf,
+} from './infer.js'
+import type {
+  SchedulerCardInitSchema,
+  SchedulerCoreEnv,
+  SchedulerNewCardFn,
+  SchedulerNewCardOptions,
+} from './scheduler.js'
+import {
+  config,
+  createSM2NumericScheduler,
+  sourceCardSchema,
+  sourceConfigSchema,
+  sourceMiddleware,
+  statusMiddleware,
+} from './scheduler.test.js'
+
+const scheduler = createSM2NumericScheduler().use(schedulerStatsMiddleware)
+const core = scheduler.create({ config })
+const middlewareScheduler = createSM2NumericScheduler().use(
+  sourceMiddleware,
+  schedulerStatsMiddleware
+)
+const usedScheduler = createSM2NumericScheduler().use(
+  sourceMiddleware,
+  schedulerStatsMiddleware
+)
+const chainedScheduler = createSM2NumericScheduler()
+  .use(sourceMiddleware)
+  .use(schedulerStatsMiddleware)
+const statusScheduler = createSM2NumericScheduler().use(statusMiddleware)
+
+const usedCore = usedScheduler.create({
+  config: {
+    ...config,
+    source: 'used-source',
+  },
+})
+
+describe('defineScheduler', () => {
+  it.each([undefined, false, true])(
+    'shares flat fractionalDays config with Date chrono and middleware (%s)',
+    (fractionalDays) => {
+      const capture = defineMiddleware({
+        name: 'test.shared-fractional-days',
+        schema: { config: fractionalDaysConfigSchema },
+        handlers: {
+          review(ctx, next) {
+            expect(ctx.config.fractionalDays).toBe(fractionalDays ?? false)
+            expect(ctx.elapsedDays).toBe(fractionalDays ? 2 / 1440 : 1)
+            next()
+          },
+        },
+      })
+      const definition = defineScheduler({
+        model: SM2Model,
+        chrono: dateChrono,
+      }).use(capture)
+      const shared = definition.create({
+        config: { ...config, fractionalDays },
+      })
+      expect(shared.config.fractionalDays).toBe(fractionalDays ?? false)
+      const from = new Date('2026-09-08T23:59:00Z')
+      const to = new Date('2026-09-09T00:01:00Z')
+      const card = {
+        ...shared.newCard({ now: from }),
+        state: State.Review,
+        lastReviewAt: from,
+      }
+      const result = shared.review({ card, now: to, grade: Rating.Good })
+      expect(shared.rollback(result).lastReviewAt).toEqual(from)
+      // A parsed config can be reused without introducing a nested chrono config.
+      expect(definition.create({ config: shared.config }).config).toEqual(
+        shared.config
+      )
+      expect(() =>
+        definition.create({
+          config: { ...config, fractionalDays: 'true' } as never,
+        })
+      ).toThrow('fractionalDays')
+    }
+  )
+
+  it('accepts Temporal timezone and fractionalDays in the same flat config', () => {
+    const capture = defineMiddleware({
+      name: 'test.shared-temporal-fractional-days',
+      schema: { config: fractionalDaysConfigSchema },
+      handlers: {
+        review(ctx, next) {
+          expect(ctx.config.fractionalDays).toBe(true)
+          expect(ctx.elapsedDays).toBe(2 / 1440)
+          next()
+        },
+      },
+    })
+    const definition = defineScheduler({
+      model: SM2Model,
+      chrono: temporalInstantChrono,
+    }).use(capture)
+    const shared = definition.create({
+      config: { ...config, timezone: 'Asia/Tokyo', fractionalDays: true },
+    })
+    expect(shared.config).toMatchObject({
+      timezone: 'Asia/Tokyo',
+      fractionalDays: true,
+    })
+    const from = Temporal.Instant.from('2026-09-08T14:59:00Z')
+    const to = Temporal.Instant.from('2026-09-08T15:01:00Z')
+    const card = {
+      ...shared.newCard({ now: from }),
+      state: State.Review,
+      lastReviewAt: from,
+    }
+    const result = shared.review({ card, now: to, grade: Rating.Good })
+    expect(shared.rollback(result).lastReviewAt).toBe(from)
+    expect(definition.create({ config }).config).toMatchObject({
+      timezone: 'UTC',
+      fractionalDays: false,
+    })
+    expect(() =>
+      definition.create({ config: { ...config, timezone: 'not-a-timezone' } })
+    ).toThrow('timezone')
+  })
+  it('preserves model name', () => {
+    expect(scheduler.name).toBe('sm2')
+    expectTypeOf(scheduler.name).toEqualTypeOf<'sm2'>()
+  })
+
+  it('exposes merged default values', () => {
+    const emptyCard = scheduler.defaultValue.newCard(
+      {
+        operation: 'newCard',
+        config: scheduler.schema.config.parse(config),
+        input: {},
+      },
+      0
+    )
+    expect(emptyCard).toMatchObject({
+      state: State.New,
+      interval: 0,
+      reps: 0,
+      lapses: 0,
+    })
+  })
+
+  it('types new-card input declared by middleware', () => {
+    usedCore.newCard({ source: 'injected-source' })
+    const invalidNewCard = () => {
+      usedCore.newCard({
+        // @ts-expect-error unknown fields are not declared new-card input
+        unknown: true,
+      })
+      core.newCard({
+        // @ts-expect-error schedulers without declared input do not accept it
+        input: {},
+      })
+    }
+
+    expectTypeOf(invalidNewCard).toBeFunction()
+  })
+
+  it('includes middleware new-card input in SchedulerEnvFor', () => {
+    type Env = SchedulerEnvFor<
+      typeof SM2Model,
+      typeof dateChrono,
+      readonly [typeof sourceMiddleware]
+    >
+
+    expectTypeOf<
+      SchedulerNewCardOptions<SchedulerCoreEnv<Env>>
+    >().toEqualTypeOf<{
+      readonly now?: Date
+      readonly source?: string
+    }>()
+  })
+
+  it('requires new-card input when middleware declares required fields', () => {
+    const requiredInputMiddleware = defineMiddleware({
+      name: 'requiredCardInitInput',
+      schema: {
+        cardInitInput: sourceConfigSchema,
+        card: sourceCardSchema,
+      },
+      defaultValue: {
+        card(ctx) {
+          return { source: ctx.input.source }
+        },
+      },
+    })
+    const requiredCore = createSM2NumericScheduler()
+      .use(requiredInputMiddleware)
+      .create({ config })
+
+    expect(requiredCore.newCard({ source: 'required' }).source).toBe('required')
+    const missingRequiredInput = () => {
+      // @ts-expect-error required middleware input makes options required
+      requiredCore.newCard()
+      // @ts-expect-error required middleware field cannot be omitted from options
+      requiredCore.newCard({ now: 0 })
+    }
+
+    expectTypeOf(missingRequiredInput).toBeFunction()
+  })
+
+  it('merges new-card input declared by multiple middlewares', () => {
+    const noteSchema = defineSchema<{ readonly note: string }>((value) =>
+      isObject(value) && typeof value.note === 'string'
+        ? { value: { note: value.note } }
+        : { issues: [{ message: 'Expected note' }] }
+    )
+    const noteMiddleware = defineMiddleware({
+      name: 'noteCardInitInput',
+      schema: { cardInitInput: noteSchema, card: noteSchema },
+      defaultValue: {
+        card(ctx) {
+          return { note: ctx.input.note }
+        },
+      },
+    })
+    const labelSchema = defineSchema<{ readonly label: string }>((value) =>
+      isObject(value) && typeof value.label === 'string'
+        ? { value: { label: value.label } }
+        : { issues: [{ message: 'Expected label' }] }
+    )
+    const labelMiddleware = defineMiddleware({
+      name: 'labelCardInitInput',
+      schema: { cardInitInput: labelSchema, card: labelSchema },
+      defaultValue: {
+        card(ctx) {
+          return { label: ctx.input.label }
+        },
+      },
+    })
+    const mergedScheduler = createSM2NumericScheduler().use(
+      sourceMiddleware,
+      noteMiddleware,
+      labelMiddleware
+    )
+    const mergedCore = mergedScheduler.create({
+      config: { ...config, source: 'config-source' },
+    })
+    const input = {
+      source: 'input-source',
+      note: 'input-note',
+      label: 'input-label',
+    }
+
+    expect(mergedScheduler.schema.cardInitInput.parse(input)).toStrictEqual({
+      input,
+      now: undefined,
+    })
+    expect(
+      mergedScheduler.schema.cardInitInput.parse({ ...input, now: 4 })
+    ).toEqual({ input, now: 4 })
+    expect(mergedCore.newCard(input)).toMatchObject({
+      source: 'input-source',
+      note: 'input-note',
+      label: 'input-label',
+    })
+  })
+
+  it('exposes merged schemas', () => {
+    expect(scheduler.schema.config).toBeDefined()
+    expect(scheduler.schema.cardInitInput).toBeDefined()
+    expect(scheduler.schema.card).toBeDefined()
+    expect(scheduler.schema.revlog).toBeDefined()
+    expect(() => scheduler.schema.cardInitInput.parse(null)).toThrow(
+      'Expected card init input object'
+    )
+    expect(
+      scheduler.schema.cardInitInput.parse({ now: 'raw-now' as never })
+    ).toStrictEqual({ input: {}, now: 'raw-now' })
+  })
+
+  it('keeps schema and default-value branches isolated after use()', () => {
+    const baseScheduler = createSM2NumericScheduler()
+    const baseSchema = baseScheduler.schema
+    const baseDefaultValue = baseScheduler.defaultValue
+    const sourceScheduler = baseScheduler.use(sourceMiddleware)
+    const statsScheduler = baseScheduler.use(schedulerStatsMiddleware)
+    const sourceSchema = sourceScheduler.schema
+    const statsSchema = statsScheduler.schema
+    const sourceDefaultValue = sourceScheduler.defaultValue
+    const statsDefaultValue = statsScheduler.defaultValue
+
+    expect(sourceScheduler).not.toBe(baseScheduler)
+    expect(statsScheduler).not.toBe(baseScheduler)
+    expect(statsScheduler).not.toBe(sourceScheduler)
+    expect(baseScheduler.use()).toBe(baseScheduler)
+    expect(sourceSchema).not.toBe(baseSchema)
+    expect(statsSchema).not.toBe(baseSchema)
+    expect(sourceSchema).not.toBe(statsSchema)
+    expect(sourceDefaultValue).not.toBe(baseDefaultValue)
+    expect(statsDefaultValue).not.toBe(baseDefaultValue)
+    expect(sourceScheduler.schema).toBe(sourceSchema)
+    expect(statsScheduler.schema).toBe(statsSchema)
+    expect(sourceScheduler.defaultValue).toBe(sourceDefaultValue)
+    expect(statsScheduler.defaultValue).toBe(statsDefaultValue)
+
+    const baseCard = baseDefaultValue.newCard(
+      {
+        operation: 'newCard',
+        config: baseSchema.config.parse(config),
+        input: {},
+      },
+      0
+    )
+    const sourceCard = sourceDefaultValue.newCard(
+      {
+        operation: 'newCard',
+        config: sourceSchema.config.parse({
+          ...config,
+          source: 'source-branch',
+        }),
+        input: {},
+      },
+      0
+    )
+    const statsCard = statsDefaultValue.newCard(
+      {
+        operation: 'newCard',
+        config: statsSchema.config.parse(config),
+        input: {},
+      },
+      0
+    )
+
+    expect(baseScheduler.schema).toBe(baseSchema)
+    expect(baseScheduler.defaultValue).toBe(baseDefaultValue)
+    expect(baseCard).not.toHaveProperty('source')
+    expect(baseCard).not.toHaveProperty('reps')
+    expect(sourceCard).toHaveProperty('source', 'source-branch')
+    expect(sourceCard).not.toHaveProperty('reps')
+    expect(sourceSchema.card.parse(sourceCard)).toHaveProperty(
+      'source',
+      'source-branch'
+    )
+    expect(statsCard).toMatchObject({ reps: 0, lapses: 0 })
+    expect(statsCard).not.toHaveProperty('source')
+    expect(statsSchema.card.parse(statsCard)).toMatchObject({
+      reps: 0,
+      lapses: 0,
+    })
+  })
+
+  it('validates scheduler config input before merging config fields', () => {
+    expect(() => scheduler.schema.config.parse(null)).toThrow(
+      'Expected scheduler config object'
+    )
+  })
+
+  it('validates chrono config while merging scheduler config', () => {
+    const offsetSchema = defineSchema<{ readonly offset: number }>((value) => {
+      if (
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        typeof (value as { readonly offset?: unknown }).offset === 'number'
+      ) {
+        return {
+          value: {
+            offset: (value as { readonly offset: number }).offset,
+          },
+        }
+      }
+
+      return { issues: [{ message: 'Expected offset config' }] }
+    })
+    const offsetChrono = defineChrono({
+      schema: {
+        config: offsetSchema,
+        time: numberSchema,
+      },
+      normalize(value) {
+        if (
+          value &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          typeof (value as { readonly time?: unknown }).time === 'number'
+        ) {
+          const time = (value as { readonly time: number }).time
+          return { value: { previous: time, current: time } }
+        }
+
+        return { issues: [{ message: 'Expected offset time' }] }
+      },
+      create() {
+        return {
+          now: () => 0,
+          difference: (from: number, to: number) => to - from,
+          add: (from: number, days: number) => from + days,
+        }
+      },
+    })
+    const chronoScheduler = defineScheduler({
+      model: SM2Model,
+      chrono: offsetChrono,
+    })
+
+    expect(
+      chronoScheduler.schema.config.parse({
+        ...config,
+        offset: 9,
+      }).offset
+    ).toBe(9)
+    expect(() =>
+      chronoScheduler.schema.config.parse({
+        ...config,
+        offset: 'bad',
+      })
+    ).toThrow('Expected offset config')
+  })
+
+  it('validates middleware config while merging scheduler config', () => {
+    expect(() => middlewareScheduler.schema.config.parse(config)).toThrow(
+      'Expected source config'
+    )
+  })
+
+  it('rejects async middleware schema validation', () => {
+    const asyncConfigSchema: StandardSchemaV1<unknown, object> = {
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        async validate() {
+          return { value: {} }
+        },
+      },
+    }
+    const asyncMiddleware = defineMiddleware({
+      name: 'async-config',
+      schema: { config: asyncConfigSchema },
+    })
+    const asyncScheduler = createSM2NumericScheduler().use(asyncMiddleware)
+
+    expect(() => asyncScheduler.schema.config.parse(config)).toThrow(
+      'Async Standard Schema validation is not supported'
+    )
+  })
+
+  it('validates card and revlog object inputs', () => {
+    expect(() => scheduler.schema.card.parse(null)).toThrow(
+      'Expected card object'
+    )
+    expect(() => scheduler.schema.revlog.parse(null)).toThrow(
+      'Expected revlog object'
+    )
+  })
+
+  it('validates middleware card and revlog fields', () => {
+    const card = usedCore.newCard()
+    const review = usedCore.review({
+      card,
+      grade: Rating.Good,
+      now: 1,
+    })
+    const { source: _source, ...cardWithoutSource } = card
+    const { audit: _audit, ...revlogWithoutAudit } = review.revlog
+
+    expect(() => usedScheduler.schema.card.parse(cardWithoutSource)).toThrow(
+      'Expected source card field'
+    )
+    expect(() => usedScheduler.schema.revlog.parse(revlogWithoutAudit)).toThrow(
+      'Expected audit revlog field'
+    )
+  })
+
+  it('validates merged chrono and model revlog fields', () => {
+    const dateScheduler = defineScheduler({
+      model: SM2Model,
+      chrono: dateChrono,
+    })
+    const dueAt = new Date('2026-01-02T00:00:00.000Z')
+    const reviewTime = new Date('2026-01-03T00:00:00.000Z')
+    const fields = {
+      interval: 1,
+      easeFactor: 2.5,
+      reviewStep: 1,
+      state: State.Review,
+      scheduleStatus: 'review' as const,
+    }
+
+    expect(() =>
+      dateScheduler.schema.card.parse({
+        ...fields,
+        dueAt: new Date(0),
+      })
+    ).toThrow('Expected valid Date fields')
+    expect(() =>
+      dateScheduler.schema.revlog.parse({
+        ...fields,
+        interval: 'bad',
+        rating: Rating.Good,
+        dueAt,
+        reviewTime,
+      })
+    ).toThrow('Expected SM2 memory state')
+    expect(() =>
+      dateScheduler.schema.revlog.parse({
+        ...fields,
+        rating: Rating.Good,
+        dueAt: new Date(0),
+        reviewTime,
+      })
+    ).toThrow('Expected valid Date fields')
+    expect(() =>
+      dateScheduler.schema.revlog.parse({
+        ...fields,
+        rating: Rating.Manual,
+        dueAt,
+        reviewTime,
+      })
+    ).toThrow('Expected grade')
+    expect(
+      dateScheduler.schema.revlog.parse({
+        ...fields,
+        rating: Rating.Good,
+        dueAt,
+        reviewTime,
+      }).reviewTime
+    ).toBe(reviewTime)
+  })
+
+  it('infers merged config type', () => {
+    expectTypeOf<SchedulerConfigOf<typeof scheduler>>().toEqualTypeOf<{
+      readonly weights: readonly number[]
+      readonly clearStatsOnForget: boolean
+    }>()
+  })
+
+  it('infers middleware config type', () => {
+    expectTypeOf<
+      SchedulerConfigOf<typeof middlewareScheduler>
+    >().toEqualTypeOf<{
+      readonly weights: readonly number[]
+      readonly source: string
+      readonly clearStatsOnForget: boolean
+    }>()
+  })
+
+  it('preserves middleware config type through use()', () => {
+    expectTypeOf<SchedulerConfigOf<typeof usedScheduler>>().toEqualTypeOf<{
+      readonly weights: readonly number[]
+      readonly source: string
+      readonly clearStatsOnForget: boolean
+    }>()
+  })
+
+  it('preserves prior config type through chained use()', () => {
+    expectTypeOf<SchedulerConfigOf<typeof chainedScheduler>>().toEqualTypeOf<{
+      readonly weights: readonly number[]
+      readonly source: string
+      readonly clearStatsOnForget: boolean
+    }>()
+  })
+
+  it('infers the complete flat new-card input', () => {
+    expectTypeOf<
+      SchedulerCardInitInputOf<typeof usedScheduler>
+    >().toEqualTypeOf<{
+      readonly source?: string
+      readonly now?: number
+    }>()
+    expectTypeOf<
+      SchedulerCardInitInputOf<typeof chainedScheduler>
+    >().toEqualTypeOf<{
+      readonly source?: string
+      readonly now?: number
+    }>()
+  })
+
+  it('infers merged card type with flattened model fields', () => {
+    expectTypeOf<SchedulerCardOf<typeof scheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      reps: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      state: State
+      lapses: number
+    }>()
+  })
+
+  it('infers readonly middleware card input fields', () => {
+    expectTypeOf<
+      SchedulerCardInputOf<typeof middlewareScheduler>
+    >().toEqualTypeOf<{
+      readonly interval: number
+      readonly easeFactor: number
+      readonly reviewStep: number
+      readonly reps: number
+      readonly lapses: number
+      readonly source?: string
+      readonly scheduleStatus: 'new' | 'learning' | 'review'
+      readonly state: State
+    }>()
+  })
+
+  it('infers middleware card fields', () => {
+    expectTypeOf<SchedulerCardOf<typeof middlewareScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      reps: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      state: State
+      lapses: number
+      source: string
+    }>()
+  })
+
+  it('preserves middleware card fields through use()', () => {
+    expectTypeOf<SchedulerCardOf<typeof usedScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      reps: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      state: State
+      lapses: number
+      source: string
+    }>()
+  })
+
+  it('preserves prior card fields through chained use()', () => {
+    expectTypeOf<SchedulerCardOf<typeof chainedScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      reps: number
+      source: string
+      scheduleStatus: 'new' | 'learning' | 'review'
+      state: State
+      lapses: number
+    }>()
+  })
+
+  it('infers merged revlog type with flattened model fields', () => {
+    expectTypeOf<SchedulerRevlogOf<typeof scheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      rating: 1 | 2 | 3 | 4
+      state: State
+    }>()
+  })
+
+  it('infers readonly middleware revlog input fields', () => {
+    expectTypeOf<
+      SchedulerRevlogInputOf<typeof middlewareScheduler>
+    >().toEqualTypeOf<{
+      readonly interval: number
+      readonly easeFactor: number
+      readonly reviewStep: number
+      readonly audit?: string
+      readonly scheduleStatus: 'new' | 'learning' | 'review'
+      readonly rating: 1 | 2 | 3 | 4
+      readonly state: State
+    }>()
+  })
+
+  it('infers middleware revlog fields', () => {
+    expectTypeOf<
+      SchedulerRevlogOf<typeof middlewareScheduler>
+    >().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      rating: 1 | 2 | 3 | 4
+      state: State
+      audit: string
+    }>()
+  })
+
+  it('preserves middleware revlog fields through use()', () => {
+    expectTypeOf<SchedulerRevlogOf<typeof usedScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      scheduleStatus: 'new' | 'learning' | 'review'
+      rating: 1 | 2 | 3 | 4
+      state: State
+      audit: string
+    }>()
+  })
+
+  it('preserves prior revlog fields through chained use()', () => {
+    expectTypeOf<SchedulerRevlogOf<typeof chainedScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      audit: string
+      scheduleStatus: 'new' | 'learning' | 'review'
+      rating: 1 | 2 | 3 | 4
+      state: State
+    }>()
+  })
+
+  it('infers time type from chrono', () => {
+    expectTypeOf<SchedulerTimeOf<typeof scheduler>>().toEqualTypeOf<number>()
+  })
+
+  it('infers default scheduler status type', () => {
+    expectTypeOf<SchedulerStatusOf<typeof scheduler>>().toEqualTypeOf<
+      'new' | 'learning' | 'review'
+    >()
+  })
+
+  it('extends scheduler status via use()', () => {
+    expectTypeOf<SchedulerStatusOf<typeof statusScheduler>>().toEqualTypeOf<
+      'new' | 'learning' | 'review' | 'suspend' | 'buried'
+    >()
+  })
+
+  it('validates scheduleStatus against default and middleware keys', () => {
+    const card = core.newCard()
+
+    expect(scheduler.schema.scheduleStatus.parse('new')).toBe('new')
+    expect(() => scheduler.schema.scheduleStatus.parse(1 as never)).toThrow(
+      'Expected scheduleStatus string'
+    )
+    expect(() => scheduler.schema.scheduleStatus.parse('suspend')).toThrow(
+      'Expected known scheduleStatus'
+    )
+    expect(statusScheduler.schema.scheduleStatus.parse('suspend')).toBe(
+      'suspend'
+    )
+    expect(() => statusScheduler.schema.scheduleStatus.parse('typo')).toThrow(
+      'Expected known scheduleStatus'
+    )
+
+    expect(() =>
+      scheduler.schema.card.parse({
+        ...card,
+        state: 'bad',
+      })
+    ).toThrow('Expected state')
+    expect(() =>
+      scheduler.schema.card.parse({
+        ...card,
+        scheduleStatus: 'suspend',
+      })
+    ).toThrow('Expected known scheduleStatus')
+    expect(
+      statusScheduler.schema.card.parse({
+        ...card,
+        scheduleStatus: 'suspend',
+      }).scheduleStatus
+    ).toBe('suspend')
+    expect(() =>
+      statusScheduler.schema.card.parse({
+        ...card,
+        scheduleStatus: 'typo',
+      })
+    ).toThrow('Expected known scheduleStatus')
+    expect(
+      statusScheduler.schema.revlog.parse({
+        ...card,
+        rating: Rating.Good,
+        scheduleStatus: 'buried',
+      }).scheduleStatus
+    ).toBe('buried')
+  })
+
+  it('extends card and revlog schedule status via use()', () => {
+    type ExtendedStatus = 'new' | 'learning' | 'review' | 'suspend' | 'buried'
+
+    expectTypeOf<SchedulerCardOf<typeof statusScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      state: State
+      scheduleStatus: ExtendedStatus
+    }>()
+    expectTypeOf<SchedulerRevlogOf<typeof statusScheduler>>().toEqualTypeOf<{
+      interval: number
+      easeFactor: number
+      reviewStep: number
+      scheduleStatus: ExtendedStatus
+      rating: Grade
+      state: State
+    }>()
+  })
+
+  it('keeps 20 chained use() calls equal to one use() call', () => {
+    const passThrough = (name: string) =>
+      defineMiddleware({
+        name,
+        handlers: {
+          review(_ctx, next) {
+            next()
+          },
+        },
+      })
+    const m0 = passThrough('m0')
+    const m1 = passThrough('m1')
+    const m2 = passThrough('m2')
+    const m3 = passThrough('m3')
+    const m4 = passThrough('m4')
+    const m5 = passThrough('m5')
+    const m6 = passThrough('m6')
+    const m7 = passThrough('m7')
+    const m8 = passThrough('m8')
+    const m9 = passThrough('m9')
+    const m10 = passThrough('m10')
+    const m11 = passThrough('m11')
+    const m12 = passThrough('m12')
+    const m13 = passThrough('m13')
+    const m14 = passThrough('m14')
+    const m15 = passThrough('m15')
+    const m16 = passThrough('m16')
+
+    const chained = createSM2NumericScheduler()
+      .use(sourceMiddleware)
+      .use(m0)
+      .use(m1)
+      .use(m2)
+      .use(m3)
+      .use(m4)
+      .use(m5)
+      .use(m6)
+      .use(statusMiddleware)
+      .use(m7)
+      .use(m8)
+      .use(m9)
+      .use(m10)
+      .use(m11)
+      .use(m12)
+      .use(m13)
+      .use(m14)
+      .use(m15)
+      .use(m16)
+      .use(schedulerStatsMiddleware)
+    const once = createSM2NumericScheduler().use(
+      sourceMiddleware,
+      m0,
+      m1,
+      m2,
+      m3,
+      m4,
+      m5,
+      m6,
+      statusMiddleware,
+      m7,
+      m8,
+      m9,
+      m10,
+      m11,
+      m12,
+      m13,
+      m14,
+      m15,
+      m16,
+      schedulerStatsMiddleware
+    )
+    const chainedConfig = { weights: config.weights, source: 'chained' }
+    const chainedCore = chained.create({ config: chainedConfig })
+    const onceCore = once.create({ config: chainedConfig })
+    const card = chainedCore.newCard({ now: 0 })
+
+    type Status = 'new' | 'learning' | 'review' | 'suspend' | 'buried'
+    type ExpectedTypes = {
+      configInput: {
+        readonly weights: readonly number[]
+        readonly source: string
+        readonly clearStatsOnForget?: boolean
+      }
+      config: {
+        readonly weights: readonly number[]
+        readonly source: string
+        readonly clearStatsOnForget: boolean
+      }
+      cardInitInput: { readonly source?: string; readonly now?: number }
+      cardInput: {
+        readonly interval: number
+        readonly easeFactor: number
+        readonly reviewStep: number
+        readonly source?: string
+        readonly reps: number
+        readonly lapses: number
+        readonly state: State
+        readonly scheduleStatus: Status
+      }
+      card: {
+        interval: number
+        easeFactor: number
+        reviewStep: number
+        source: string
+        reps: number
+        lapses: number
+        state: State
+        scheduleStatus: Status
+      }
+      revlogInput: {
+        readonly interval: number
+        readonly easeFactor: number
+        readonly reviewStep: number
+        readonly audit?: string
+        readonly state: State
+        readonly scheduleStatus: Status
+        readonly rating: Grade
+      }
+      revlog: {
+        interval: number
+        easeFactor: number
+        reviewStep: number
+        audit: string
+        state: State
+        scheduleStatus: Status
+        rating: Grade
+      }
+      status: Status
+    }
+
+    // Both sides are checked against ExpectedTypes. Comparing inferred
+    // scheduler types with each other, or SchedulerConfigInputOf of a chained
+    // scheduler, already trips TS2590 inside expectTypeOf on main.
+    expectTypeOf<
+      Parameters<typeof chained.create>[0]['config']
+    >().toEqualTypeOf<ExpectedTypes['configInput']>()
+    expectTypeOf<SchedulerConfigOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['config']
+    >()
+    expectTypeOf<SchedulerCardInitInputOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['cardInitInput']
+    >()
+    expectTypeOf<SchedulerCardInputOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['cardInput']
+    >()
+    expectTypeOf<SchedulerCardOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['card']
+    >()
+    expectTypeOf<SchedulerRevlogInputOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['revlogInput']
+    >()
+    expectTypeOf<SchedulerRevlogOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['revlog']
+    >()
+    expectTypeOf<SchedulerStatusOf<typeof chained>>().toEqualTypeOf<
+      ExpectedTypes['status']
+    >()
+    expectTypeOf<Parameters<typeof once.create>[0]['config']>().toEqualTypeOf<
+      ExpectedTypes['configInput']
+    >()
+    expectTypeOf<SchedulerConfigOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['config']
+    >()
+    expectTypeOf<SchedulerCardInitInputOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['cardInitInput']
+    >()
+    expectTypeOf<SchedulerCardInputOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['cardInput']
+    >()
+    expectTypeOf<SchedulerCardOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['card']
+    >()
+    expectTypeOf<SchedulerRevlogInputOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['revlogInput']
+    >()
+    expectTypeOf<SchedulerRevlogOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['revlog']
+    >()
+    expectTypeOf<SchedulerStatusOf<typeof once>>().toEqualTypeOf<
+      ExpectedTypes['status']
+    >()
+    expectTypeOf(chainedCore.newCard).toEqualTypeOf(onceCore.newCard)
+    expectTypeOf(chainedCore.review).toEqualTypeOf(onceCore.review)
+    expectTypeOf(chainedCore.preview).toEqualTypeOf(onceCore.preview)
+    expectTypeOf(chainedCore.rollback).toEqualTypeOf(onceCore.rollback)
+    expect(chainedCore.review({ card, grade: Rating.Good, now: 1 })).toEqual(
+      onceCore.review({ card, grade: Rating.Good, now: 1 })
+    )
+  })
+
+  it('keeps union card init input branches in newCard options', () => {
+    type UnionInitEnv = {
+      readonly config: object
+      readonly cardInitInput:
+        | { readonly kind: 'a'; readonly a: number; readonly now?: number }
+        | { readonly kind: 'b'; readonly b: string; readonly now?: number }
+      readonly card: { readonly input: object; readonly output: object }
+      readonly revlog: { readonly input: object; readonly output: object }
+      readonly chrono: number
+      readonly scheduleStatus: 'new'
+    }
+    type NewCard = SchedulerNewCardFn<UnionInitEnv>
+
+    expectTypeOf<Parameters<NewCard>[0]>().toEqualTypeOf<
+      | { readonly kind: 'a'; readonly a: number; readonly now?: number }
+      | { readonly kind: 'b'; readonly b: string; readonly now?: number }
+    >()
+  })
+
+  it('keeps union card fields through use()', () => {
+    type Core = { state: State; scheduleStatus: 'new' }
+    type UnionCard = { kind: 'a'; a: number } | { kind: 'b'; b: string }
+    type UnionEnv = {
+      readonly chrono: number
+      readonly scheduleStatus: 'new'
+      readonly config: SRSSchema<{ input: object; output: object }>
+      readonly cardInitInput: SchedulerCardInitSchema<number>
+      readonly card: SRSSchema<{
+        input: Readonly<UnionCard & Core>
+        output: UnionCard & Core
+      }>
+      readonly revlog: SRSSchema<{
+        input: Readonly<Core & { rating: Grade }>
+        output: Core & { rating: Grade }
+      }>
+    }
+    type Extended = { schema: ExtendSchedulerEnv<UnionEnv, []> }
+
+    expectTypeOf<SchedulerCardOf<Extended>>().toEqualTypeOf<
+      | { kind: 'a'; a: number; state: State; scheduleStatus: 'new' }
+      | { kind: 'b'; b: string; state: State; scheduleStatus: 'new' }
+    >()
+    expectTypeOf<SchedulerCardInputOf<Extended>>().toEqualTypeOf<
+      | {
+          readonly kind: 'a'
+          readonly a: number
+          readonly state: State
+          readonly scheduleStatus: 'new'
+        }
+      | {
+          readonly kind: 'b'
+          readonly b: string
+          readonly state: State
+          readonly scheduleStatus: 'new'
+        }
+    >()
+  })
+})

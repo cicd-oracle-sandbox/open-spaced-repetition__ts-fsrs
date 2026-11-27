@@ -1,0 +1,129 @@
+import { type Grade, Rating } from '@open-spaced-repetition/srs-kit'
+import { describe, expect, it } from 'vitest'
+import { FSRS5Algorithm, forgetting_curve } from './algorithm.js'
+import {
+  FSRS5_DECAY,
+  FSRS5_DEFAULT_WEIGHTS,
+  FSRS5_FACTOR,
+  FSRS5_MODEL_BOUNDS,
+} from './constants.js'
+
+describe('FSRS5Algorithm', () => {
+  const algorithm = new FSRS5Algorithm(
+    FSRS5_DEFAULT_WEIGHTS,
+    true,
+    FSRS5_MODEL_BOUNDS
+  )
+
+  it('uses the FSRS-5 forgetting curve constants', () => {
+    expect(FSRS5_DECAY).toBe(0.5)
+    expect(FSRS5_FACTOR).toBe(19 / 81)
+    expect(forgetting_curve(8, 8.2956)).toBe(0.90306221)
+  })
+
+  it('rejects an invalid weight count', () => {
+    expect(() => new FSRS5Algorithm([], true, FSRS5_MODEL_BOUNDS)).toThrow(
+      'FSRS5Algorithm requires exactly 19 weights'
+    )
+  })
+
+  it('calculates intervals through the FSRS-5 interval modifier', () => {
+    expect(algorithm.next_interval(15.69105, 0.9)).toBe(16)
+    expect(algorithm.next_interval(15.69105, 0.8)).toBe(38)
+    expect(() => algorithm.next_interval(1, 0)).toThrow(
+      'Requested retention rate should be in the range (0,1]'
+    )
+  })
+
+  it('initializes the first review state from FSRS-5 weights', () => {
+    const states = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy].map(
+      (rating) => algorithm.next_state(null, 0, rating)
+    )
+
+    expect(states.map((state) => state.stability)).toEqual([
+      0.40255, 1.18385, 3.173, 15.69105,
+    ])
+    expect(states.map((state) => state.difficulty)).toEqual([
+      7.1949, 6.48830527, 5.28243442, 3.22450159,
+    ])
+
+    const clamped = new FSRS5Algorithm(
+      [
+        Number.NEGATIVE_INFINITY,
+        Number.POSITIVE_INFINITY,
+        ...FSRS5_DEFAULT_WEIGHTS.slice(2),
+      ],
+      true,
+      FSRS5_MODEL_BOUNDS
+    )
+    expect(clamped.init_stability(Rating.Again)).toBe(FSRS5_MODEL_BOUNDS.sMin)
+    expect(clamped.init_stability(Rating.Hard)).toBe(FSRS5_MODEL_BOUNDS.sMax)
+  })
+
+  it('validates state inputs and handles every review rating', () => {
+    const state = { difficulty: 5, stability: 10 }
+
+    expect(() => algorithm.next_state(state, -1, Rating.Good)).toThrow(
+      'Invalid delta_t "-1"'
+    )
+    expect(() => algorithm.next_state(state, 1, -1 as Grade)).toThrow(
+      'Invalid grade "-1"'
+    )
+    expect(() => algorithm.next_state(state, 1, 5 as Grade)).toThrow(
+      'Invalid grade "5"'
+    )
+    expect(algorithm.next_state(state, 1, Rating.Manual as Grade)).toEqual(
+      state
+    )
+    expect(() =>
+      algorithm.next_state({ difficulty: 0.5, stability: 10 }, 1, Rating.Good)
+    ).toThrow('Invalid memory state')
+
+    for (const rating of [Rating.Hard, Rating.Easy] as const) {
+      const next = algorithm.next_state(state, 1, rating, 0.9)
+      expect(next.difficulty).toBeGreaterThanOrEqual(FSRS5_MODEL_BOUNDS.dMin)
+      expect(next.stability).toBeGreaterThanOrEqual(FSRS5_MODEL_BOUNDS.sMin)
+    }
+
+    const withoutShortTerm = new FSRS5Algorithm(
+      FSRS5_DEFAULT_WEIGHTS,
+      false,
+      FSRS5_MODEL_BOUNDS
+    )
+    for (const candidate of [algorithm, withoutShortTerm]) {
+      const next = candidate.next_state(state, 1, Rating.Again, 0.9)
+      expect(next.stability).toBeGreaterThanOrEqual(FSRS5_MODEL_BOUNDS.sMin)
+    }
+  })
+
+  it.each([
+    [true, 48.26549438, 7.10441712],
+    [false, 48.065163, 7.10441712],
+  ])(
+    'matches v4.7.1 memory-state progression when enableShortTerm=%s',
+    (enableShortTerm, expectedStability, expectedDifficulty) => {
+      const testAlgorithm = new FSRS5Algorithm(
+        FSRS5_DEFAULT_WEIGHTS,
+        enableShortTerm,
+        FSRS5_MODEL_BOUNDS
+      )
+      const ratings: Grade[] = [
+        Rating.Again,
+        Rating.Good,
+        Rating.Good,
+        Rating.Good,
+        Rating.Good,
+        Rating.Good,
+      ]
+      const intervals = [0, 0, 1, 3, 8, 21]
+      let state = null
+
+      for (const [index, rating] of ratings.entries()) {
+        state = testAlgorithm.next_state(state, intervals[index], rating)
+      }
+
+      expect(state!.stability).toBeCloseTo(expectedStability, 4)
+      expect(state!.difficulty).toBeCloseTo(expectedDifficulty, 4)
+    }
+  )
+})

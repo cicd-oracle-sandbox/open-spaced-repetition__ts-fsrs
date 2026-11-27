@@ -1,0 +1,273 @@
+/** biome-ignore-all lint/suspicious/noExplicitAny: wildcard constraint for generic bounds */
+export type IsAny<T> = unknown extends T
+  ? [keyof T] extends [never]
+    ? false
+    : true
+  : false
+
+type Primitive = null | undefined | string | number | boolean | symbol | bigint
+
+type ConstructorInstance<T> = T extends abstract new (
+  ...args: any
+) => infer I
+  ? IsAny<I> extends true
+    ? never
+    : unknown extends I
+      ? never
+      : keyof I extends never
+        ? never
+        : I
+  : never
+
+type ConstructorInstances<T> = {
+  [K in keyof T]: ConstructorInstance<T[K]>
+}[keyof T]
+
+type GlobalBuiltIn = {
+  [K in keyof typeof globalThis]: K extends 'Object'
+    ? never
+    : ConstructorInstance<(typeof globalThis)[K]>
+}[keyof typeof globalThis]
+
+type GlobalNamespaceBuiltIn<K extends PropertyKey> =
+  K extends keyof typeof globalThis
+    ? ConstructorInstances<(typeof globalThis)[K]>
+    : never
+
+type TemporalBuiltIn = GlobalNamespaceBuiltIn<'Temporal'>
+
+type BuiltIn = Primitive | GlobalBuiltIn | TemporalBuiltIn
+
+export type Prettify<T> = [T] extends [BuiltIn]
+  ? T
+  : { [K in keyof T]: T[K] } & {}
+
+export type EmptyObject = Record<PropertyKey, never>
+
+export type EmptyPart = Record<never, never>
+
+export type MergePart<Value> = [Value] extends [never] ? EmptyPart : Value
+
+export type Mutable<T> = { -readonly [Key in keyof T]: T[Key] }
+
+export type MutableRecord = Record<PropertyKey, unknown>
+
+/** @internal */
+export type Unset = 'unset' & {
+  __brand: 'srs-kit'
+}
+
+// ---------------------------------------------------------------------------
+// Override / field-merge utilities
+// ---------------------------------------------------------------------------
+
+export type IsNonEmptyObject<T> = T extends object
+  ? keyof T extends never
+    ? false
+    : true
+  : false
+
+export type Assign<TLeft, TRight> = TLeft extends any
+  ? TRight extends any
+    ? IsNonEmptyObject<TLeft> extends false
+      ? TRight
+      : IsNonEmptyObject<TRight> extends false
+        ? TLeft
+        : keyof TLeft & keyof TRight extends never
+          ? TLeft & TRight
+          : Omit<TLeft, keyof TRight> & TRight
+    : never
+  : never
+
+/**
+ * Assign with readonly control. Keys and modifiers come from Assign, but
+ * values are read from Left/Right directly, so a field inherited through N
+ * nested AssignFields resolves in N mapped steps instead of going through
+ * each level's Omit (keeps chained scheduler use() below TS2589).
+ */
+export type AssignFields<
+  Left,
+  Right,
+  Modifier extends 'readonly' | 'mutable' | 'preserve',
+> = Left extends any
+  ? Right extends any
+    ? AssignFieldsOf<Left, Right, Modifier, Assign<Left, Right>>
+    : never
+  : never
+
+type AssignFieldsOf<
+  Left,
+  Right,
+  Modifier extends 'readonly' | 'mutable' | 'preserve',
+  Fields,
+> = Modifier extends 'readonly'
+  ? {
+      readonly [Key in keyof Fields]: Key extends keyof Right
+        ? Right[Key]
+        : Left[Key & keyof Left]
+    }
+  : Modifier extends 'mutable'
+    ? {
+        -readonly [Key in keyof Fields]: Key extends keyof Right
+          ? Right[Key]
+          : Left[Key & keyof Left]
+      }
+    : {
+        [Key in keyof Fields]: Key extends keyof Right
+          ? Right[Key]
+          : Left[Key & keyof Left]
+      }
+
+export type IntersectAssign<TLeft, TRight> = TLeft extends any
+  ? TRight extends any
+    ? IsNonEmptyObject<TLeft> extends false
+      ? TRight
+      : IsNonEmptyObject<TRight> extends false
+        ? TLeft
+        : TRight & TLeft
+    : never
+  : never
+
+export type Constrain<T, TConstraint, TDefault = TConstraint> =
+  | (T extends TConstraint ? T : never)
+  | TDefault
+
+export type FirstChar<S extends string> = S extends `${infer C}${string}`
+  ? C
+  : never
+
+export type NumericKeysWithPrefix<C extends string, T extends object> = {
+  [K in string & keyof T]: T[K] extends number
+    ? K extends `${C}${string}`
+      ? K
+      : never
+    : never
+}[string & keyof T]
+
+export type BoundsPrefix<Key extends string, T extends object> =
+  NumericKeysWithPrefix<FirstChar<Key>, T> extends Key ? FirstChar<Key> : string
+
+export type DeepPartial<T> = T extends object
+  ? {
+      [P in keyof T]?: DeepPartial<T[P]>
+    }
+  : T
+
+export type UnionToIntersection<T> = (
+  T extends any
+    ? (arg: T) => any
+    : never
+) extends (arg: infer U) => any
+  ? U
+  : never
+
+type ExtractObjects<TUnion> = Exclude<TUnion, ReadonlyArray<any> | Primitive>
+
+export type MergeAllObjects<
+  TUnion,
+  TIntersected = UnionToIntersection<ExtractObjects<TUnion>>,
+> = [keyof TIntersected] extends [never]
+  ? never
+  : {
+      [TKey in keyof TIntersected]: TUnion extends any
+        ? TUnion[TKey & keyof TUnion]
+        : never
+    }
+
+type AnyFn = ((...args: any[]) => unknown) & Record<keyof any, unknown>
+
+export function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && !Array.isArray(value) && typeof value === 'object'
+}
+
+export function isFiniteNumber(value: unknown): value is number {
+  return Number.isFinite(value)
+}
+
+export function isFunction(fn: unknown): fn is AnyFn {
+  return typeof fn === 'function'
+}
+
+export const run = <TValue>(fn: () => TValue): TValue => fn()
+
+export function noop(): void {}
+
+export function assert(
+  condition: boolean,
+  msg = 'no additional info'
+): asserts condition {
+  if (!condition) {
+    throw new Error(`AssertionError: ${msg}`)
+  }
+}
+
+// Only for fresh records kept private until all fields have been copied.
+// An empty frozen prototype prevents inherited setters during native assignment.
+export const emptyRecordPrototype: object = Object.freeze(Object.create(null))
+
+/**
+ * Write an own data property without invoking a target setter.
+ * The target must be a library-owned mutable ordinary record.
+ */
+function defineOwnDataField(
+  target: object,
+  key: PropertyKey,
+  value: unknown
+): void {
+  const record = target as Record<PropertyKey, unknown>
+  // Own writable data properties cannot invoke inherited setters.
+  if (key in target) {
+    const existing = Object.getOwnPropertyDescriptor(target, key)
+    if (existing && 'value' in existing && existing.writable) {
+      record[key] = value
+      return
+    }
+  } else {
+    const prototype = Object.getPrototypeOf(target)
+    if (prototype === Object.prototype || prototype === null) {
+      record[key] = value
+      return
+    }
+  }
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+export function assignObjectFields(target: object, source: object) {
+  const fields = source as Record<string, unknown>
+  for (const key in fields) {
+    if (Object.hasOwn(fields, key)) {
+      defineOwnDataField(target, key, fields[key])
+    }
+  }
+}
+
+/**
+ * Shallow-copy own enumerable string and symbol values.
+ * Later sources override earlier sources.
+ *
+ * This is a record merge, not a general-purpose Object.assign replacement.
+ */
+export function assignEnumerableDataFields<T extends object>(
+  target: T,
+  ...sources: readonly unknown[]
+): T {
+  for (const source of sources) {
+    if (source == null) continue
+    const fields = Object(source)
+    assignObjectFields(target, fields)
+
+    for (const key of Object.getOwnPropertySymbols(fields)) {
+      const descriptor = Object.getOwnPropertyDescriptor(fields, key)
+      if (!descriptor?.enumerable) continue
+
+      defineOwnDataField(target, key, fields[key])
+    }
+  }
+
+  return target
+}

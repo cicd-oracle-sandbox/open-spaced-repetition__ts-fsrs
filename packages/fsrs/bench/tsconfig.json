@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "paths": {
+      "@/*": ["../src/*"],
+      "ts-fsrs": ["../src/index.ts"],
+      "ts-fsrs/*": ["../src/*"]
+    },
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["."],
+  "exclude": []
+}

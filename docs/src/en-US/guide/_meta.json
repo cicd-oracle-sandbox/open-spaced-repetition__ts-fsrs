@@ -1,0 +1,43 @@
+[
+  {
+    "type": "section-header",
+    "label": "Getting Started"
+  },
+  "index",
+  "quick-start",
+  "migration",
+  "architecture",
+  "state-transitions",
+  "llms",
+  {
+    "type": "dir",
+    "name": "model",
+    "collapsible": true,
+    "collapsed": true,
+    "label": "Model"
+  },
+  {
+    "type": "dir",
+    "name": "chrono",
+    "label": "Chrono",
+    "collapsible": true,
+    "collapsed": true
+  },
+  {
+    "type": "dir",
+    "name": "middleware",
+    "label": "Middleware",
+    "collapsible": true,
+    "collapsed": true
+  },
+  {
+    "type": "dir-section-header",
+    "name": "scheduler",
+    "label": "Scheduler"
+  },
+  {
+    "type": "dir-section-header",
+    "name": "optimizer",
+    "label": "Optimizer"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "type": "section-header",
+    "label": "はじめかた"
+  },
+  "index",
+  "quick-start",
+  "migration",
+  "architecture",
+  "state-transitions",
+  "llms",
+  {
+    "type": "dir",
+    "name": "model",
+    "collapsible": true,
+    "collapsed": true,
+    "label": "モデル"
+  },
+  {
+    "type": "dir",
+    "name": "chrono",
+    "label": "Chrono",
+    "collapsible": true,
+    "collapsed": true
+  },
+  {
+    "type": "dir",
+    "name": "middleware",
+    "label": "ミドルウェア",
+    "collapsible": true,
+    "collapsed": true
+  },
+  {
+    "type": "dir-section-header",
+    "name": "scheduler",
+    "label": "スケジューラ"
+  },
+  {
+    "type": "dir-section-header",
+    "name": "optimizer",
+    "label": "Optimizer"
+  }
+]

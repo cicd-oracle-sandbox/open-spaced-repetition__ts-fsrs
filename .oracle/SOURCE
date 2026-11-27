@@ -1,0 +1,4 @@
+upstream: https://github.com/open-spaced-repetition/ts-fsrs
+commit: 3243489f5eb11874e12ae6b89ecf64fad2715c09
+license: MIT
+Unmodified snapshot except that .github/workflows was emptied.

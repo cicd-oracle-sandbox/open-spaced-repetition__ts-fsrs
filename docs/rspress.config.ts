@@ -1,0 +1,272 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { pluginTailwindcss } from '@rsbuild/plugin-tailwindcss'
+import { defineConfig, withBase, withSiteOrigin } from '@rspress/core'
+import { pluginRss } from '@rspress/plugin-rss'
+import { pluginSitemap } from '@rspress/plugin-sitemap'
+import { pluginTwoslash } from '@rspress/plugin-twoslash'
+import type { Root } from 'mdast'
+import rehypeKatex from 'rehype-katex'
+import remarkMath from 'remark-math'
+import { visit } from 'unist-util-visit'
+import { adaptI18nSource } from './src/i18n'
+import {
+  readLandingContributors,
+  readLandingSponsors,
+} from './src/landing/community'
+import { collectLandingPreviews } from './src/landing/preview'
+import { collectLandingSnippets } from './src/landing/snippets'
+import { collectPlaygroundDeclarations } from './src/playground/editor/collect-declarations'
+import {
+  collectHighlightedExportNames,
+  keepTsFsrsTypeHover,
+} from './src/playground/highlight/twoslash'
+import { prepareExampleSource } from './src/playground/shared/example-source'
+import { pluginReleaseUpdates, releaseFeedOutput } from './src/releases'
+import { pluginRobotsTxt } from './src/seo/robots'
+
+const siteOrigin = process.env.DOCS_SITE_ORIGIN
+// Preview deployments serve the site from the root of their own subdomain,
+// while a project page would serve it from a repository sub-path. Leaving this
+// to an env var keeps both correct from one config.
+const base = process.env.DOCS_BASE ?? '/'
+// Preview deployments duplicate the production site, so only the production
+// build asks to be crawled.
+const indexable = process.env.DOCS_INDEXABLE === 'true'
+const repository =
+  process.env.DOCS_REPO_SLUG ?? 'open-spaced-repetition/ts-fsrs'
+const repositoryRef = (process.env.DOCS_REPO_REF ?? 'main')
+  .split('/')
+  .map(encodeURIComponent)
+  .join('/')
+const workspaceRoot = path.resolve(import.meta.dirname, '..')
+const playgroundDeclarations = collectPlaygroundDeclarations(workspaceRoot)
+const highlightedExportNames = collectHighlightedExportNames(
+  playgroundDeclarations
+)
+// Any module whose path ends in `.css` is pulled into the site-wide stylesheet,
+// so the editor styles are inlined as a string that only the playground's async
+// chunk references. Monaco's icon font is a data URI, so no asset rewriting is
+// needed. See src/playground/editor/styles-stub.css for the other half.
+const monacoEditorStyles = readFileSync(
+  path.resolve(
+    path.dirname(createRequire(import.meta.url).resolve('monaco-editor')),
+    'editor/editor.main.css'
+  ),
+  'utf8'
+)
+
+// Rspress ships a fixed set of named social icons and RSS is not among them,
+// so the navbar entry supplies its own inline SVG.
+const rssIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6.18 15.64a2.18 2.18 0 0 1 2.18 2.18C8.36 19 7.38 20 6.18 20 5 20 4 19 4 17.82a2.18 2.18 0 0 1 2.18-2.18M4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93z"/></svg>`
+
+const twoslashOptions = {
+  filterNode: (node: Parameters<typeof keepTsFsrsTypeHover>[0]) =>
+    keepTsFsrsTypeHover(node, highlightedExportNames),
+}
+const remarkCodeToMath = () =>
+  function transform(tree: Root) {
+    visit(tree, 'code', (node) => {
+      if (node.lang !== 'math') return
+      node.data = {
+        hName: 'div',
+        hProperties: { className: ['math', 'math-display'] },
+      }
+      delete node.lang
+      delete node.meta
+    })
+    visit(tree, 'inlineCode', (node) => {
+      if (!node.value.startsWith('math:')) return
+      node.value = node.value.slice('math:'.length)
+      node.data = {
+        hName: 'span',
+        hProperties: { className: ['math', 'math-inline'] },
+      }
+    })
+  }
+const landingSnippets = await collectLandingSnippets(
+  import.meta.dirname,
+  twoslashOptions
+)
+const landingPreviews = collectLandingPreviews()
+const landingSponsors = readLandingSponsors(import.meta.dirname)
+const landingContributors = readLandingContributors(import.meta.dirname)
+
+export default defineConfig({
+  root: path.join(import.meta.dirname, 'src'),
+  base,
+  route: {
+    extensions: ['.md', '.mdx'],
+    exclude: ['releases/template.mdx'],
+    localeRedirect: 'never',
+    // Without this every page answers to both `/guide/` and `/guide/index.html`,
+    // and internal links, hreflang, and the sitemap all pick the `.html` form.
+    // One canonical shape per page keeps crawlers from seeing duplicates.
+    cleanUrls: true,
+  },
+  markdown: {
+    remarkPlugins: [remarkMath, remarkCodeToMath],
+    rehypePlugins: [[rehypeKatex, { output: 'mathml' }]],
+  },
+  themeDir: path.join(import.meta.dirname, 'theme'),
+  title: 'ts-fsrs',
+  description: 'Developer documentation for ts-fsrs',
+  lang: 'en-US',
+  locales: [
+    {
+      lang: 'en-US',
+      label: 'English',
+      title: 'ts-fsrs',
+      description: 'Developer documentation for ts-fsrs',
+    },
+    {
+      lang: 'zh-CN',
+      label: '简体中文',
+      title: 'ts-fsrs',
+      description: 'ts-fsrs 开发者文档',
+    },
+    {
+      lang: 'zh-TW',
+      label: '繁體中文',
+      title: 'ts-fsrs',
+      description: 'ts-fsrs 開發者文件',
+    },
+    {
+      lang: 'ja-JP',
+      label: '日本語',
+      title: 'ts-fsrs',
+      description: 'ts-fsrs 開発者向けドキュメント',
+    },
+  ],
+  i18nSource: adaptI18nSource,
+  siteOrigin,
+  head: [
+    // Only emitted once the deployment knows its own origin, since a relative
+    // canonical tells a crawler nothing it did not already know.
+    (route) =>
+      siteOrigin
+        ? [
+            'link',
+            {
+              rel: 'canonical',
+              href: withSiteOrigin(withBase(route.routePath, base), siteOrigin),
+            },
+          ]
+        : undefined,
+  ],
+  llms: true,
+  builderConfig: {
+    plugins: [
+      pluginTailwindcss(),
+      {
+        name: 'example-base-url',
+        setup(api) {
+          api.transform(
+            {
+              test: /[\\/](?:playground[\\/]examples|snippets[\\/]run-code)[\\/].*\.ts$/,
+              resourceQuery: /^\?raw$/,
+              order: 'pre',
+            },
+            ({ code }: { code: string }) => prepareExampleSource(code, base)
+          )
+        },
+      },
+    ],
+    dev: {
+      // Only files this config reads at evaluation time belong here, because a
+      // restart is the sole way to pick them up: otherwise the dev server keeps
+      // serving whatever was captured at startup, so `useI18n` throws on every
+      // key added since and edited landing snippets never reach the home page.
+      // `src/snippets/run-code` deliberately stays out — the guide imports it
+      // with `?raw`, which puts it in the module graph, and widening this to
+      // `src/snippets` would trade that HMR update for a full restart.
+      watchFiles: {
+        paths: [
+          path.join(import.meta.dirname, 'src/i18n'),
+          path.join(import.meta.dirname, 'src/snippets/landing'),
+        ],
+        type: 'reload-server',
+      },
+    },
+    source: {
+      define: {
+        __MONACO_EDITOR_STYLES__: JSON.stringify(monacoEditorStyles),
+        __PLAYGROUND_DTS_FILES__: JSON.stringify(playgroundDeclarations),
+        __LANDING_SNIPPETS__: JSON.stringify(landingSnippets),
+        __LANDING_PREVIEWS__: JSON.stringify(landingPreviews),
+        __LANDING_SPONSORS__: JSON.stringify(landingSponsors),
+        __LANDING_CONTRIBUTORS__: JSON.stringify(landingContributors),
+      },
+    },
+    tools: {
+      rspack(config, { rspack }) {
+        // See src/playground/editor/styles-stub.css for why Monaco's styles are
+        // redirected to an empty stylesheet rather than dropped outright.
+        config.plugins?.push(
+          new rspack.NormalModuleReplacementPlugin(
+            /[\\/]monaco-editor[\\/]esm[\\/].+\.css$/,
+            path.join(
+              import.meta.dirname,
+              'src/playground/editor/styles-stub.css'
+            )
+          )
+        )
+      },
+    },
+  },
+  plugins: [
+    pluginReleaseUpdates(workspaceRoot),
+    pluginTwoslash({ twoslashOptions }),
+    // `siteUrl` is left out so the plugin combines `siteOrigin` and `base`
+    // itself, which makes a preview deployment map its own host. A sitemap of
+    // relative paths is useless, so it is skipped when no origin is known.
+    ...(siteOrigin
+      ? [
+          pluginSitemap(),
+          pluginRobotsTxt({
+            siteOrigin,
+            base,
+            indexable,
+            outDir: path.join(import.meta.dirname, 'doc_build'),
+          }),
+        ]
+      : []),
+    pluginRss({
+      output: { transform: releaseFeedOutput },
+      feed: [
+        {
+          id: 'updates',
+          test: /^\/updates\//,
+          title: 'ts-fsrs updates',
+          language: 'en-US',
+        },
+      ],
+    }),
+  ],
+  search: {
+    searchHooks: path.join(import.meta.dirname, 'search.ts'),
+  },
+  icon: '/osr-logo.svg',
+  logo: '/osr-logo.svg',
+  logoText: 'ts-fsrs',
+  themeConfig: {
+    socialLinks: [
+      {
+        icon: 'github',
+        mode: 'github-stars',
+        content: 'https://github.com/open-spaced-repetition/ts-fsrs',
+      },
+      {
+        // `socialLinks` is site-wide, so this points at the section that lists
+        // the per-locale feeds rather than at one locale's `.xml`.
+        icon: { svg: rssIcon },
+        mode: 'link',
+        content: withBase('/guide/llms#feeds', base),
+      },
+    ],
+    editLink: {
+      docRepoBaseUrl: `https://github.com/${repository}/tree/${repositoryRef}/docs/src`,
+    },
+  },
+})

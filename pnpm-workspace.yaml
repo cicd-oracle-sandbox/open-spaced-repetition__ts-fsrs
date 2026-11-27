@@ -1,0 +1,35 @@
+packages:
+  - docs
+  - packages/*
+  - packages/binding/npm/*
+  # - examples/*
+
+# Publish through pnpm so catalog ranges are resolved in the tarball.
+catalog:
+  # Keep this pair exact: wasm-runtime 1.2.6 plugins require Emnapi's addonModule.
+  '@emnapi/core': 2.0.0-beta.3
+  '@emnapi/runtime': 2.0.0-beta.3
+  '@napi-rs/wasm-runtime': 1.2.6
+  emnapi: 2.0.0-beta.3
+
+overrides:
+  monaco-editor>dompurify: ^3.4.13
+  # Vitest 5 pins tinybench 6.1.4, whose types require the DOM lib.
+  vitest>tinybench: 6.2.0
+  is-core-module: npm:@nolyfill/is-core-module@^1
+  minimatch: '>=10.2.3'
+  # Rolldown uses Emnapi 1; wasm-runtime 1.2 requires Emnapi 2.
+  '@rolldown/binding-wasm32-wasi>@napi-rs/wasm-runtime': 1.1.6
+  katex@>=0.11.0 <0.18.2: ^0.18.2
+  sharp@<0.35.5: ^0.35.5
+  shell-quote@>=1.8.4 <1.11.0: ^1.11.0
+  source-map-js@>=1.0.0 <1.2.2: ^1.2.2
+
+verifyDepsBeforeRun: error
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: false
+
+supportedArchitectures:
+  cpu: [current, wasm32]

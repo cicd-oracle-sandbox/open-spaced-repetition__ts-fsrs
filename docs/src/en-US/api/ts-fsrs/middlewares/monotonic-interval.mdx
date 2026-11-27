@@ -1,0 +1,28 @@
+---
+title: MonotonicInterval
+description: Built-in middleware schedulerMonotonicIntervalMiddleware — ensures that the rating's intervals are never larger than previous ratings.
+---
+
+import RunCode from '../../../../components/RunCode'
+import monotonicCode from '@/snippets/run-code/api/ts-fsrs/middlewares/monotonic-interval.ts?raw'
+
+# MonotonicInterval
+
+`ts-fsrs/middlewares` export `schedulerMonotonicIntervalMiddleware`:
+
+```ts
+import { schedulerMonotonicIntervalMiddleware } from 'ts-fsrs/middlewares'
+```
+
+It orders the scheduled interval across the four ratings so harder ratings are never scheduled later than easier ones (subject to `maximumInterval`). If a lower rating has an interval of one day or more, a later rating of one day or more is at least one day longer than the previous one, and a later sub-day interval is increased to the duration of the previous interval. If every lower rating is below one day, intervals won't decrease decrease. A rating that lands on the same second as the previous rating is scheduled one second later.
+
+```ts twoslash file="../../../../snippets/run-code/api/ts-fsrs/middlewares/monotonic-interval.ts"
+```
+
+<RunCode code={monotonicCode} />
+
+Register ScheduledDays before MonotonicInterval so it stores the adjusted interval as the handlers unwind. This example uses high retention to force overlapping raw intervals; `scheduledDays` and the actual due-time offsets both become `[1, 2, 3, 4]`.
+
+Previewing the candidate ratings on one Review card yields ascending `scheduledDays`.
+
+**See** — [Built-in policies](../../../guide/middleware/built-in).

@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest'
+import { calculateScheduleDay, calculateScheduleDays } from './core.js'
+
+describe('calculateScheduleDays', () => {
+  it('keeps the first interval and advances each later rating', () => {
+    expect(calculateScheduleDays([4], 100)).toEqual([4])
+    expect(calculateScheduleDays([4, 2], 100)).toEqual([4, 5])
+    expect(calculateScheduleDays([4, 2, 8], 100)).toEqual([4, 5, 8])
+    expect(calculateScheduleDays([4, 2, 8, 7], 100)).toEqual([4, 5, 8, 9])
+  })
+
+  it('preserves already monotonic intervals', () => {
+    expect(calculateScheduleDays([2, 4, 8, 16], 100)).toEqual([2, 4, 8, 16])
+  })
+
+  it('allows zero-day intervals to remain equal', () => {
+    expect(calculateScheduleDays([0, 0, 2, 3], 100)).toEqual([0, 0, 2, 3])
+    expect(calculateScheduleDays([0, 0, 0, 0], 100)).toEqual([0, 0, 0, 0])
+    expect(calculateScheduleDays([0, 1, 1, 1], 100)).toEqual([0, 1, 2, 3])
+  })
+
+  it('allows equal intervals once the maximum is reached', () => {
+    expect(calculateScheduleDays([98, 99, 100, 101], 100)).toEqual([
+      98, 99, 100, 100,
+    ])
+    expect(calculateScheduleDays([100, 100, 100], 100)).toEqual([100, 100, 100])
+  })
+
+  it('caps the first interval without comparing it with the next rating', () => {
+    expect(calculateScheduleDays([102], 100)).toEqual([100])
+    expect(calculateScheduleDays([102, 101, 100], 100)).toEqual([100, 100, 100])
+  })
+
+  it('does not mutate the candidate tuple', () => {
+    const candidates = [8, 5, 4, 3] as const
+
+    const result = calculateScheduleDays(candidates, 100)
+    result[0] = 1
+
+    expect(candidates).toEqual([8, 5, 4, 3])
+  })
+
+  it('returns the current rating interval', () => {
+    expect(calculateScheduleDay([4], 100)).toBe(4)
+    expect(calculateScheduleDay([4, 2], 100)).toBe(5)
+    expect(calculateScheduleDay([4, 2, 8], 100)).toBe(8)
+    expect(calculateScheduleDay([4, 2, 8, 7], 100)).toBe(9)
+    expect(calculateScheduleDay([0, 0, 2, 3], 100)).toBe(3)
+    expect(calculateScheduleDay([98, 99, 100, 101], 100)).toBe(100)
+    expect(calculateScheduleDay([102], 100)).toBe(100)
+  })
+
+  it('keeps sub-day intervals non-decreasing and separates equal seconds', () => {
+    const second = 1 / 86400
+    expect(calculateScheduleDay([1 / 1440], 100)).toBe(1 / 1440)
+    expect(calculateScheduleDay([1 / 1440, 5 / 1440], 100)).toBe(5 / 1440)
+    expect(calculateScheduleDay([5 / 1440, 1 / 1440], 100)).toBe(5 / 1440)
+    expect(calculateScheduleDay([0.5, 0.5 + second / 3], 100)).toBe(
+      0.5 + second
+    )
+    expect(calculateScheduleDay([0.5, 0.5, 0.5], 100)).toBe(
+      0.5 + second + second
+    )
+    expect(calculateScheduleDay([0, 0, 5 / 1440], 100)).toBe(5 / 1440)
+    // A higher candidate must not collapse onto an adjusted lower rating.
+    expect(calculateScheduleDay([0.5, 0.5, 0.5 + 0.6 * second], 100)).toBe(
+      0.5 + second + second
+    )
+  })
+
+  it('ignores sub-day candidates when a day interval exists', () => {
+    expect(calculateScheduleDay([1, 5 / 1440], 100)).toBe(1)
+    expect(calculateScheduleDay([1 / 1440, 5 / 1440, 1, 1], 100)).toBe(2)
+    expect(calculateScheduleDay([1, 5 / 1440, 10 / 1440, 1], 100)).toBe(2)
+  })
+})

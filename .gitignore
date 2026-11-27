@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Turbo
+.turbo/
+
+
+# Build outputs
+**/dist
+
+
+# AI
+.claude
+.cursor
+.specstory
+
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# IDE and editor files
+.idea
+*.swp
+*.swo
+.DS_Store
+
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Sample review log fetched at build time (see docs/scripts/fetch-revlog.mjs)
+docs/src/public/revlog.csv
+
+# Prepared releases and community data are regenerated before docs dev/build.
+/docs/.generated/
+
+# Documentation and coverage
+**/coverage/
+/docs/doc_build/
+/docs/playwright-report/
+/docs/test-results/
+
+# Rust
+target/
+artifacts/

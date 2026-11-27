@@ -1,0 +1,395 @@
+use napi::bindgen_prelude::{FnArgs, Function};
+use napi_derive::napi;
+use serde::{Deserialize, Serialize};
+
+#[napi(js_name = "FSRSBindingReview")]
+#[derive(Debug)]
+pub struct FSRSReview {
+  pub(crate) inner: fsrs::FSRSReview,
+}
+
+#[napi]
+impl FSRSReview {
+  #[napi(constructor)]
+  pub fn new(rating: u32, delta_t: f64) -> Self {
+    Self {
+      inner: fsrs::FSRSReview {
+        rating,
+        delta_t: delta_t as f32,
+      },
+    }
+  }
+  /// 1-4
+  #[napi(getter)]
+  pub fn rating(&self) -> u32 {
+    self.inner.rating
+  }
+  /// The number of days that passed
+  /// # Warning
+  /// `delta_t` for item first(initial) review must be 0
+  #[napi(getter)]
+  pub fn delta_t(&self) -> f64 {
+    self.inner.delta_t as f64
+  }
+
+  #[napi(js_name = "toString")]
+  pub fn to_string(&self) -> napi::Result<String> {
+    serde_json::to_string(&self.inner)
+      .map_err(|e| napi::Error::from_reason(format!("Failed to serialize to JSON: {}", e)))
+  }
+
+  #[napi(js_name = "[Symbol.toStringTag]")]
+  pub fn string_tag(&self) -> String {
+    "FSRSBindingReview".to_string()
+  }
+}
+
+/// Stores a list of reviews for a card, in chronological order. Each FSRSItem corresponds
+/// to a single review, but contains the previous reviews of the card as well, after the
+/// first one.
+///
+/// When used during review, the last item should include the correct `delta_t`, but
+/// the provided rating is ignored as all four ratings are returned by `.nextStates()`
+#[napi(js_name = "FSRSBindingItem")]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FSRSItem {
+  pub(crate) inner: fsrs::FSRSItem,
+}
+#[napi]
+impl FSRSItem {
+  #[napi(constructor)]
+  pub fn new(reviews: Vec<&FSRSReview>) -> napi::Result<Self> {
+    Ok(Self {
+      inner: fsrs::FSRSItem {
+        reviews: reviews
+          .iter()
+          .map(|review| {
+            if !(1..=4).contains(&review.inner.rating) {
+              return Err(napi::Error::from_reason("rating must be between 1 and 4"));
+            }
+            Ok(review.inner)
+          })
+          .collect::<napi::Result<_>>()?,
+      },
+    })
+  }
+
+  #[napi(getter)]
+  pub fn reviews(&self) -> Vec<FSRSReview> {
+    self
+      .inner
+      .reviews
+      .iter()
+      .map(|x| FSRSReview { inner: *x })
+      .collect()
+  }
+
+  #[napi(getter)]
+  pub fn current(&self) -> Option<FSRSReview> {
+    self.inner.reviews.last().map(|&x| FSRSReview { inner: x })
+  }
+
+  #[napi]
+  pub fn long_term_review_cnt(&self) -> u32 {
+    self.inner.long_term_review_cnt() as u32
+  }
+
+  #[napi]
+  pub fn include_long_term_reviews(&self) -> bool {
+    self
+      .inner
+      .reviews
+      .iter()
+      .any(|review| review.delta_t >= 1.0)
+  }
+
+  #[napi(js_name = "toString")]
+  pub fn to_string(&self) -> napi::Result<String> {
+    serde_json::to_string(&self.inner)
+      .map_err(|e| napi::Error::from_reason(format!("Failed to serialize to JSON: {}", e)))
+  }
+
+  #[napi(js_name = "[Symbol.toStringTag]")]
+  pub fn string_tag(&self) -> String {
+    "FSRSBindingItem".to_string()
+  }
+}
+
+#[napi(js_name = "BindingMemoryState")]
+#[derive(Debug)]
+pub struct MemoryState {
+  pub(crate) inner: fsrs::MemoryState,
+}
+#[napi]
+impl MemoryState {
+  #[napi(constructor)]
+  pub fn new(stability: f64, difficulty: f64, stability_fast: Option<f64>) -> Self {
+    Self {
+      inner: fsrs::MemoryState {
+        stability: stability as f32,
+        difficulty: difficulty as f32,
+        stability_fast: stability_fast.unwrap_or(stability) as f32,
+      },
+    }
+  }
+  #[napi(getter)]
+  pub fn stability(&self) -> f64 {
+    self.inner.stability as f64
+  }
+  /// FSRS-7 fast stability.
+  #[napi(getter)]
+  pub fn stability_fast(&self) -> f64 {
+    self.inner.stability_fast as f64
+  }
+  #[napi(getter)]
+  pub fn difficulty(&self) -> f64 {
+    self.inner.difficulty as f64
+  }
+  #[napi(js_name = "toString")]
+  pub fn to_string(&self) -> napi::Result<String> {
+    serde_json::to_string(&self.inner)
+      .map_err(|e| napi::Error::from_reason(format!("Failed to serialize to JSON: {}", e)))
+  }
+
+  #[napi(js_name = "[Symbol.toStringTag]")]
+  pub fn string_tag(&self) -> String {
+    "BindingMemoryState".to_string()
+  }
+}
+
+#[napi(js_name = "BindingNextStates")]
+#[derive(Debug)]
+pub struct NextStates {
+  pub(crate) inner: fsrs::NextStates,
+}
+#[napi]
+impl NextStates {
+  #[napi(getter)]
+  pub fn hard(&self) -> ItemState {
+    ItemState {
+      inner: self.inner.hard.clone(),
+    }
+  }
+  #[napi(getter)]
+  pub fn good(&self) -> ItemState {
+    ItemState {
+      inner: self.inner.good.clone(),
+    }
+  }
+  #[napi(getter)]
+  pub fn easy(&self) -> ItemState {
+    ItemState {
+      inner: self.inner.easy.clone(),
+    }
+  }
+  #[napi(getter)]
+  pub fn again(&self) -> ItemState {
+    ItemState {
+      inner: self.inner.again.clone(),
+    }
+  }
+
+  #[napi(js_name = "toString")]
+  pub fn to_string(&self) -> napi::Result<String> {
+    serde_json::to_string(&serde_json::json!(self.inner))
+      .map_err(|e| napi::Error::from_reason(format!("Failed to serialize to JSON: {}", e)))
+  }
+
+  #[napi(js_name = "[Symbol.toStringTag]")]
+  pub fn string_tag(&self) -> String {
+    "BindingNextStates".to_string()
+  }
+}
+
+#[napi(js_name = "BindingItemState")]
+#[derive(Debug)]
+pub struct ItemState {
+  pub(crate) inner: fsrs::ItemState,
+}
+#[napi]
+impl ItemState {
+  #[napi(getter)]
+  pub fn memory(&self) -> MemoryState {
+    MemoryState {
+      inner: self.inner.memory,
+    }
+  }
+  #[napi(getter)]
+  pub fn interval(&self) -> f32 {
+    self.inner.interval
+  }
+
+  #[napi(js_name = "toString")]
+  pub fn to_string(&self) -> napi::Result<String> {
+    serde_json::to_string(&serde_json::json!(self.inner))
+      .map_err(|e| napi::Error::from_reason(format!("Failed to serialize to JSON: {}", e)))
+  }
+
+  #[napi(js_name = "[Symbol.toStringTag]")]
+  pub fn string_tag(&self) -> String {
+    "BindingItemState".to_string()
+  }
+}
+
+#[napi(object)]
+pub struct ModelEvaluation {
+  pub log_loss: f64,
+  pub rmse_bins: f64,
+}
+
+impl From<fsrs::ModelEvaluation> for ModelEvaluation {
+  fn from(value: fsrs::ModelEvaluation) -> Self {
+    Self {
+      log_loss: value.log_loss as f64,
+      rmse_bins: value.rmse_bins as f64,
+    }
+  }
+}
+
+#[napi(object)]
+pub struct StepRatingStats {
+  /// Number of data points for this rating
+  pub count: u32,
+  /// Delay quartiles in seconds
+  pub delay_q1: f64,
+  pub delay_q2: f64,
+  pub delay_q3: f64,
+  /// Retention rates for each quartile segment
+  pub r1: f64,
+  pub r2: f64,
+  pub r3: f64,
+  pub r4: f64,
+  /// Overall retention rate
+  pub retention: f64,
+  /// Fitted stability in seconds
+  pub stability: f64,
+}
+
+#[napi(object)]
+pub struct StepStatsResult {
+  pub again: Option<StepRatingStats>,
+  pub hard: Option<StepRatingStats>,
+  pub good: Option<StepRatingStats>,
+  pub again_then_good: Option<StepRatingStats>,
+  pub good_then_again: Option<StepRatingStats>,
+  pub relearning: Option<StepRatingStats>,
+  /// Recommended learning steps in seconds (e.g. [60, 600] for "1m 10m")
+  pub recommended_learning_steps: Vec<i64>,
+  /// Recommended relearning steps in seconds
+  pub recommended_relearning_steps: Vec<i64>,
+}
+
+type ProgressFunc<'env> = Function<'env, FnArgs<(u32, u32)>, Option<bool>>;
+
+#[napi(object)]
+pub struct TrainingConfig {
+  /// Number of training epochs
+  pub num_epochs: u32,
+  /// Number of items per training batch
+  pub batch_size: u32,
+  /// Random seed used for batch shuffling
+  pub seed: u32,
+  /// Maximum review sequence length retained for training
+  pub max_seq_len: u32,
+  /// Optimizer learning rate
+  pub learning_rate: f64,
+  /// L2 regularization strength
+  pub gamma: f64,
+}
+
+impl TrainingConfig {
+  pub(crate) fn to_fsrs_config(&self) -> fsrs::TrainingConfig {
+    fsrs::TrainingConfig {
+      num_epochs: self.num_epochs as usize,
+      batch_size: self.batch_size as usize,
+      seed: self.seed as u64,
+      max_seq_len: self.max_seq_len as usize,
+      learning_rate: self.learning_rate,
+      gamma: self.gamma,
+    }
+  }
+}
+
+#[napi(string_enum)]
+pub enum ModelVersion {
+  #[napi(value = "FSRS-6")]
+  Fsrs6,
+  #[napi(value = "FSRS-7")]
+  Fsrs7,
+}
+
+#[napi(object)]
+pub struct ComputeParametersOptions<'env> {
+  /// Model to train or evaluate. Defaults to FSRS-7, matching fsrs-rs.
+  #[napi(ts_type = "`${ModelVersion}`")]
+  pub model_version: Option<ModelVersion>,
+  /// Numeric group IDs aligned with train_set, generated by convertCsvToFsrsItemsWithCardIds.
+  /// Providing IDs opts into upstream windowed training (including its FSRS-7 tuning).
+  pub card_ids: Option<Vec<i64>>,
+  /// Whether to enable short-term memory parameters
+  pub enable_short_term: bool,
+  /// Enable FSRS-7 scheduling penalties during training. Defaults to false; ignored by FSRS-6.
+  pub enable_sched_penalties: Option<bool>,
+  /// Number of relearning steps
+  pub num_relearning_steps: Option<u32>,
+  /// Training hyperparameters. Omitted config preserves the selected model defaults.
+  pub training_config: Option<TrainingConfig>,
+  /// Reports progress; return false to stop training.
+  #[napi(ts_type = "(current: number, total: number) => boolean | undefined | void")]
+  pub progress: Option<ProgressFunc<'env>>,
+  /// Progress polling interval in milliseconds; ignored on WASI Preview 1.
+  #[napi(ts_type = "number")]
+  pub timeout: Option<u32>,
+}
+
+/// `ComputeParametersOptions` translated into fsrs-rs types, with defaults applied.
+pub(crate) struct ResolvedOptions {
+  pub(crate) model_version: fsrs::ComputeParametersVersion,
+  pub(crate) enable_short_term: bool,
+  pub(crate) enable_sched_penalties: bool,
+  pub(crate) num_relearning_steps: Option<usize>,
+  pub(crate) training_config: Option<fsrs::TrainingConfig>,
+  /// Progress poll interval; only meaningful where a poller can run.
+  #[cfg(not(all(target_os = "wasi", target_env = "p1")))]
+  pub(crate) timeout_ms: u32,
+}
+
+impl ComputeParametersOptions<'_> {
+  pub(crate) fn card_ids(options: Option<&Self>) -> Option<Vec<i64>> {
+    options.and_then(|options| options.card_ids.clone())
+  }
+
+  /// Default progress poll interval in milliseconds.
+  #[cfg(not(all(target_os = "wasi", target_env = "p1")))]
+  const DEFAULT_TIMEOUT_MS: u32 = 500;
+
+  pub(crate) fn resolve(options: Option<&Self>) -> ResolvedOptions {
+    let model_version = match options.and_then(|x| x.model_version.as_ref()) {
+      Some(ModelVersion::Fsrs6) => fsrs::ComputeParametersVersion::Fsrs6,
+      _ => fsrs::ComputeParametersVersion::Fsrs7,
+    };
+    ResolvedOptions {
+      model_version,
+      enable_short_term: options.map(|x| x.enable_short_term).unwrap_or(true),
+      enable_sched_penalties: model_version == fsrs::ComputeParametersVersion::Fsrs7
+        && options
+          .and_then(|x| x.enable_sched_penalties)
+          .unwrap_or(false),
+      num_relearning_steps: options
+        .and_then(|x| x.num_relearning_steps)
+        .map(|x| x as usize),
+      training_config: options
+        .and_then(|x| x.training_config.as_ref())
+        .map(|x| x.to_fsrs_config())
+        // Preserve the old FSRS-6 defaults instead of the new internal branch defaults.
+        .or_else(|| {
+          (model_version == fsrs::ComputeParametersVersion::Fsrs6)
+            .then(fsrs::TrainingConfig::default)
+        }),
+      #[cfg(not(all(target_os = "wasi", target_env = "p1")))]
+      timeout_ms: options
+        .and_then(|x| x.timeout)
+        .unwrap_or(Self::DEFAULT_TIMEOUT_MS),
+    }
+  }
+}

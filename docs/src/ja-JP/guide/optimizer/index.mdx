@@ -1,0 +1,68 @@
+---
+title: Optimizer 概要
+description: binding で復習ログから FSRS の重みを再学習し、Node かブラウザ / Worker の実行環境を選び、CSV からパラメータまでの流れを理解する
+---
+
+import { PackageManagerTabs, Prompt } from '@rspress/core/theme'
+import { withBase, withSiteOrigin } from '@rspress/core/runtime'
+
+# Optimizer 概要
+
+FSRS は既定のモデル重みを同梱していますが、自分たちの製品の復習ログから再学習して、間隔をサービス対象のユーザーに合わせることができます。Optimizer は `@open-spaced-repetition/binding` の上で動きます。復習ログ CSV を訓練用アイテムに変換し、パラメータを推定し、その結果が保留した復習をどれだけ予測できるかを報告します。訓練した重みは `weights` 経由でそのまま `DefaultScheduler` やカスタムの `defineScheduler` に渡せます。重みの意味は[モデル](../model)、適用される場所は[スケジューラ](../scheduler)を参照してください。
+
+:::warning 注意
+Optimizer は現在ベータ版であり、API メソッドは随時変更される可能性があります。
+:::
+
+<Prompt
+  title="FSRS の重み学習を実装または説明する"
+  description="このプロンプトをコピーすると、AI Agent が Optimizer 契約（復習ログ CSV を入れて訓練済み重みを出す）に従い、共有の binding を介します。"
+  prompt={`現在の ts-fsrs Optimizer 契約を使って、次のタスクに対応してください：[タスクを記述]。
+
+1. ${withSiteOrigin(withBase('/ja-JP/guide/optimizer/index.md'))} と ${withSiteOrigin(withBase('/ja-JP/guide/optimizer/train-evaluate.md'))} を読み、実行環境の選択と復習ログのパイプラインを理解する。
+2. convertCsvToFsrsItems で復習ログ CSV を変換し、翌日が始まる時刻とタイムゾーンまたは UTC オフセットを渡す。
+3. computeParameters(items, { enableShortTerm, modelVersion }) で訓練し、返された重みを DefaultScheduler かカスタムの defineScheduler で使う。
+4. 適合度は evaluateWithTimeSeriesSplits で報告する。復習ログ・評価・状態遷移を正確に保つ。
+5. Node ではネイティブ binding、ブラウザの Worker では wasip1 の wasm ビルドを優先する。
+6. 現在の public API を使い、実装した訓練パスに焦点を絞ったテストを追加する。`}
+/>
+
+## 一つのパッケージ、二つの実行環境
+
+ネイティブ版と WASI 版は同じ API を提供します。メインパッケージは Node では利用可能なネイティブモジュールを優先し、ブラウザエントリーではマルチスレッドの WASI パッケージを使います。環境に合わせて該当するパッケージをインストールします。
+
+ネイティブモジュール（Node・サーバー・CLI）：
+
+<PackageManagerTabs command="install @open-spaced-repetition/binding" />
+
+シングルスレッドの WASI Preview 1（`wasm32-wasip1`）：
+
+<PackageManagerTabs command="install @open-spaced-repetition/binding-wasm32-wasip1" />
+
+マルチスレッドの WASI Preview 1（`wasm32-wasip1-threads`、公開パッケージ名では `wasm32-wasi`）：
+
+<PackageManagerTabs command="install @open-spaced-repetition/binding-wasm32-wasi" />
+
+マルチスレッド版は非推奨です。今回のリリースでは引き続き利用できますが、次のリリースで削除する予定です。新しい WASI 連携には上記のシングルスレッドパッケージを使ってください。
+
+```ts
+import { computeParameters } from '@open-spaced-repetition/binding'
+```
+
+シングルスレッドの WASI を明示的に選ぶ場合は、`@open-spaced-repetition/binding-wasm32-wasip1` から import してください。どちらの WASI パッケージも Node またはブラウザの Worker で実行できます。
+
+:::note COOP/COEP とスレッド
+シングルスレッド版は Cross-Origin-Opener-Policy や Cross-Origin-Embedder-Policy ヘッダなしで動作します。マルチスレッド版では引き続き COOP と COEP ヘッダを設定し、ページを `crossOriginIsolated` にする必要があります。マルチスレッドは実行環境の機能を表すもので、学習が自動的にバックグラウンドで実行されることを意味しません。
+
+`computeParameters` と `evaluateWithTimeSeriesSplits` は、どのビルドでも Promise を返します。ネイティブ binding はバックグラウンドタスクで実行します。WASI Preview 1 の両ターゲット（`wasm32-wasip1` と `wasm32-wasip1-threads`）は呼び出し元のスレッドで同期的に計算し、その結果を Promise にラップします。ブラウザでは専用 Worker から呼び出してページの応答性を保ってください。Worker は進捗コールバックから `postMessage` でページに進捗を送信できます。
+:::
+
+## 復習ログのパイプライン
+
+訓練は数回の binding 呼び出しからなる短いパイプラインです。
+
+1. `convertCsvToFsrsItems` が復習ログ CSV を `FSRSItem` のリストに変換します。
+2. `computeParameters` がそのアイテムから重みを訓練し、重みの配列を返します。
+3. `evaluateWithTimeSeriesSplits` がパラメータによる保留復習の予測品質を測定します。
+
+`computeOptimalSteps` を使えば、学習・再学習ステップの推奨も binding に依頼できます。各呼び出しの詳細は[学習と評価](./train-evaluate)、実際の訓練の実行は[Playground](../../playground)ページのトレーナーを参照してください。

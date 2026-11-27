@@ -1,0 +1,120 @@
+import {
+  defineMiddleware,
+  type NextIntervalMiddlewareContext,
+  type ReviewCandidateContext,
+} from '@open-spaced-repetition/srs-kit'
+import type { Mutable } from '@open-spaced-repetition/srs-kit/schema'
+import { createCardId } from './card-id.js'
+import {
+  FUZZ_RANGES,
+  type FuzzingRng,
+  type FuzzRange,
+  fnv1aMulberry32Rng,
+  getFuzzRange,
+} from './core.js'
+import {
+  fuzzingCardFieldsSchema,
+  fuzzingCardInitInputSchema,
+  fuzzingConfigSchema,
+  fuzzingRevlogFieldsSchema,
+} from './schema.js'
+
+const fuzzingDecoratorSymbol = Symbol('ts-fsrs.fuzzing.decorator')
+
+type FuzzingCandidate = ReviewCandidateContext & {
+  [fuzzingDecoratorSymbol]?: true
+}
+
+export type SchedulerFuzzingMiddlewareOptions = {
+  readonly fuzzingRange?: readonly FuzzRange[]
+  /** Seeded once per review; every grade of that review shares the factor. */
+  readonly rng?: FuzzingRng
+}
+
+export function createSchedulerFuzzingMiddleware(
+  options: SchedulerFuzzingMiddlewareOptions = {}
+) {
+  const { fuzzingRange = FUZZ_RANGES, rng = fnv1aMulberry32Rng } = options
+
+  function decorateInterval(
+    ctx: NextIntervalMiddlewareContext<{
+      config: typeof fuzzingConfigSchema
+      card: typeof fuzzingCardFieldsSchema
+    }>,
+    reps: number
+  ): void {
+    if (!ctx.config.enableFuzz) return
+    const candidate = ctx.candidate as Mutable<FuzzingCandidate>
+    if (candidate[fuzzingDecoratorSymbol]) return
+    candidate[fuzzingDecoratorSymbol] = true
+
+    const nextInterval = candidate.nextInterval
+    const seed = `${ctx.input.card.cardId}${reps}`
+    let fuzzFactor: number | undefined
+    candidate.nextInterval = (memoryState, desiredRetention) => {
+      const interval = nextInterval(memoryState, desiredRetention)
+      if (interval < 2.5)
+        return ctx.config.fractionalDays ? interval : Math.round(interval)
+
+      const { minInterval, maxInterval } = getFuzzRange(
+        interval,
+        ctx.elapsedDays,
+        ctx.config.maximumInterval,
+        fuzzingRange
+      )
+      fuzzFactor ??= rng(seed)()
+      return Math.floor(
+        fuzzFactor * (maxInterval - minInterval + 1) + minInterval
+      )
+    }
+  }
+
+  return defineMiddleware({
+    name: Symbol('ts-fsrs.fuzzing'),
+    schema: {
+      config: fuzzingConfigSchema,
+      cardInitInput: fuzzingCardInitInputSchema,
+      card: fuzzingCardFieldsSchema,
+      revlog: fuzzingRevlogFieldsSchema,
+    },
+    defaultValue: {
+      card(ctx) {
+        if (ctx.operation === 'forget') {
+          return {
+            cardId: ctx.input.cardId,
+            reps: ctx.config.clearStatsOnForget === false ? ctx.input.reps : 0,
+          }
+        }
+        return {
+          cardId: ctx.input.cardId ?? createCardId(),
+          reps: 0,
+        }
+      },
+    },
+    handlers: {
+      nextInterval(ctx, next) {
+        decorateInterval(ctx, ctx.input.card.reps + 1)
+        // Resolve the decorated interval after downstream overrides.
+        if (ctx.config.enableFuzz) ctx.scheduledDays = undefined
+        next()
+      },
+      review(ctx, next) {
+        const card = ctx.input.card
+        const reps = card.reps + 1
+        decorateInterval(ctx, reps)
+        next()
+        ctx.result.card.cardId = card.cardId
+        ctx.result.card.reps ??= reps
+        ctx.result.revlog.cardId = card.cardId
+      },
+
+      rollback(ctx, next) {
+        next()
+        ctx.result.card.cardId = ctx.input.revlog.cardId
+        ctx.result.card.reps ??= Math.max(0, ctx.input.card.reps - 1)
+      },
+    },
+  })
+}
+
+export const schedulerFuzzingMiddleware = createSchedulerFuzzingMiddleware()

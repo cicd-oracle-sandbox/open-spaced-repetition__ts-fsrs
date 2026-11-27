@@ -1,0 +1,186 @@
+import { describe, expect, it } from 'vitest'
+import type { Grade } from '@/primitives/rating.js'
+import { Rating } from '@/primitives/rating.js'
+import { State } from '@/primitives/state.js'
+import {
+  config,
+  createSM2NumericScheduler,
+} from '@/scheduler/scheduler.test.js'
+import { schedulerStatsMiddleware } from './middleware.js'
+
+const instance = createSM2NumericScheduler().create({ config })
+
+type ReviewHandler = NonNullable<
+  NonNullable<typeof schedulerStatsMiddleware.handlers>['review']
+>
+
+type RollbackHandler = NonNullable<
+  NonNullable<typeof schedulerStatsMiddleware.handlers>['rollback']
+>
+
+type ReviewContext = Parameters<ReviewHandler>[0]
+type RollbackContext = Parameters<RollbackHandler>[0]
+
+function reviewContext({
+  grade = Rating.Good,
+  state = State.Learning,
+  reps = 1,
+  lapses = 0,
+}: {
+  readonly grade?: Grade
+  readonly state?: State
+  readonly reps?: number
+  readonly lapses?: number
+} = {}): ReviewContext {
+  return {
+    instance,
+    config: { chrono: 0, clearStatsOnForget: true },
+    input: {
+      card: { reps, lapses, state, scheduleStatus: 'review' },
+      grade,
+      now: 0,
+    },
+    elapsedDays: 1,
+    retrievability: 0.9,
+    scheduledDays: undefined,
+    candidate: {
+      desiredRetention: {
+        [Rating.Again]: 0.9,
+        [Rating.Hard]: 0.9,
+        [Rating.Good]: 0.9,
+        [Rating.Easy]: 0.9,
+      },
+
+      step: () => ({}),
+      findGrade: () => undefined,
+      nextInterval: () => 1,
+    },
+    result: {
+      card: {},
+      revlog: {},
+    },
+  }
+}
+
+function rollbackContext({
+  rating = Rating.Good,
+  state = State.Learning,
+  reps = 1,
+  lapses = 0,
+}: {
+  readonly rating?: Grade
+  readonly state?: State
+  readonly reps?: number
+  readonly lapses?: number
+} = {}): RollbackContext {
+  return {
+    instance,
+    config: { chrono: 0, clearStatsOnForget: true },
+    input: {
+      card: { reps, lapses, state, scheduleStatus: 'review' },
+      revlog: { state, rating, scheduleStatus: 'review' },
+    },
+    result: {
+      card: {},
+    },
+  }
+}
+
+describe('schedulerStatsMiddleware', () => {
+  it('provides default stats fields', () => {
+    expect(
+      schedulerStatsMiddleware.defaultValue?.card?.({
+        operation: 'newCard',
+        config: { chrono: 0, clearStatsOnForget: true },
+        input: {},
+      })
+    ).toEqual({
+      reps: 0,
+      lapses: 0,
+    })
+  })
+
+  it('clears old stats by default when card defaults receive input', () => {
+    expect(
+      schedulerStatsMiddleware.defaultValue?.card?.({
+        operation: 'forget',
+        config: { chrono: 0, clearStatsOnForget: true },
+        input: {
+          reps: 3,
+          lapses: 1,
+          state: State.Review,
+          scheduleStatus: 'review',
+        },
+      })
+    ).toEqual({
+      reps: 0,
+      lapses: 0,
+    })
+  })
+
+  it('can preserve old stats when card defaults receive input', () => {
+    expect(
+      schedulerStatsMiddleware.defaultValue?.card?.({
+        operation: 'forget',
+        config: { chrono: 0, clearStatsOnForget: false },
+        input: {
+          reps: 3,
+          lapses: 1,
+          state: State.Review,
+          scheduleStatus: 'review',
+        },
+      })
+    ).toEqual({
+      reps: 3,
+      lapses: 1,
+    })
+  })
+
+  it('increments reps without a lapse for non-review again ratings', () => {
+    const ctx = reviewContext({ reps: 2, lapses: 1 })
+
+    schedulerStatsMiddleware.handlers?.review?.(ctx, () => {
+      ctx.result.card.state = State.Review
+    })
+
+    expect(ctx.result.card.reps).toBe(3)
+    expect(ctx.result.card.lapses).toBe(1)
+  })
+
+  it('increments lapses when review cards are rated again', () => {
+    const ctx = reviewContext({
+      grade: Rating.Again,
+      state: State.Review,
+      reps: 2,
+      lapses: 1,
+    })
+
+    schedulerStatsMiddleware.handlers?.review?.(ctx, () => {})
+
+    expect(ctx.result.card.reps).toBe(3)
+    expect(ctx.result.card.lapses).toBe(2)
+  })
+
+  it('rolls back reps and non-lapse reviews without going below zero', () => {
+    const ctx = rollbackContext({ reps: 0, lapses: 0 })
+
+    schedulerStatsMiddleware.handlers?.rollback?.(ctx, () => {})
+
+    expect(ctx.result.card.reps).toBe(0)
+    expect(ctx.result.card.lapses).toBe(0)
+  })
+
+  it('rolls back lapse counts for review again revlogs', () => {
+    const ctx = rollbackContext({
+      rating: Rating.Again,
+      state: State.Review,
+      reps: 3,
+      lapses: 2,
+    })
+
+    schedulerStatsMiddleware.handlers?.rollback?.(ctx, () => {})
+
+    expect(ctx.result.card.reps).toBe(2)
+    expect(ctx.result.card.lapses).toBe(1)
+  })
+})

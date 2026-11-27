@@ -1,0 +1,317 @@
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import type {
+  ChronoCardOf,
+  ChronoRevlogOf,
+  ChronoTimeOf,
+} from '@/chrono/infer.js'
+import { parse } from '@/schema/index.js'
+import { temporalInstantChrono } from './index.js'
+
+const NS_PER_DAY = 86_400_000_000_000n
+
+function createInstant(epochNanoseconds: bigint): Temporal.Instant {
+  return Temporal.Instant.fromEpochNanoseconds(epochNanoseconds)
+}
+
+function restoreTemporal(descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor) {
+    Object.defineProperty(globalThis, 'Temporal', descriptor)
+    return
+  }
+
+  Reflect.deleteProperty(globalThis, 'Temporal')
+}
+
+describe('temporalInstantChrono', () => {
+  it('fails at concrete runtime boundaries when Temporal is unavailable', () => {
+    const originalTemporal = Object.getOwnPropertyDescriptor(
+      globalThis,
+      'Temporal'
+    )
+
+    Object.defineProperty(globalThis, 'Temporal', {
+      configurable: true,
+      value: undefined,
+    })
+
+    try {
+      expect(() =>
+        temporalInstantChrono.create({
+          config: { fractionalDays: false, timezone: 'UTC' },
+        })
+      ).toThrow('Temporal.Instant is not available')
+      expect(() => parse(temporalInstantChrono.schema.time, {})).toThrow(
+        'Temporal.Instant is not available'
+      )
+    } finally {
+      restoreTemporal(originalTemporal)
+    }
+  })
+
+  it('provides a Temporal.Instant adapter', () => {
+    expectTypeOf<
+      ChronoTimeOf<typeof temporalInstantChrono>
+    >().toEqualTypeOf<Temporal.Instant>()
+    expectTypeOf<ChronoCardOf<typeof temporalInstantChrono>>().toEqualTypeOf<{
+      dueAt: Temporal.Instant
+      lastReviewAt: Temporal.Instant | null
+    }>()
+    expectTypeOf<ChronoRevlogOf<typeof temporalInstantChrono>>().toEqualTypeOf<{
+      dueAt: Temporal.Instant
+      lastReviewAt: Temporal.Instant | null
+      reviewTime: Temporal.Instant
+    }>()
+
+    const now = createInstant(0n)
+    const later = createInstant((NS_PER_DAY * 3n) / 2n)
+    const temporalConfig = parse(temporalInstantChrono.schema.config, {
+      timezone: 'Asia/Shanghai',
+    })
+    const {
+      add,
+      compare,
+      difference,
+      now: getCurrent,
+    } = temporalInstantChrono.create({
+      config: temporalConfig,
+    })
+    const current = getCurrent()
+
+    expect(current).toBeInstanceOf(Temporal.Instant)
+    expect(parse(temporalInstantChrono.schema.time, now)).toBe(now)
+    expect(() => parse(temporalInstantChrono.schema.time, {})).toThrow(
+      'Expected Temporal.Instant'
+    )
+    expect(parse(temporalInstantChrono.schema.config, {})).toEqual({
+      fractionalDays: false,
+      timezone: 'UTC',
+    })
+    expect(() => parse(temporalInstantChrono.schema.config, null)).toThrow(
+      'Expected temporal instant config'
+    )
+    expect(() =>
+      parse(temporalInstantChrono.schema.config, {
+        timezone: 9,
+      })
+    ).toThrow('Expected timezone to be a string')
+    expect(() =>
+      parse(temporalInstantChrono.schema.config, {
+        fractionalDays: 'yes',
+      })
+    ).toThrow('Expected fractionalDays to be a boolean')
+    expect(
+      parse(temporalInstantChrono.schema.config, {
+        timezone: 'Asia/Shanghai',
+      })
+    ).toEqual({
+      fractionalDays: false,
+      timezone: 'Asia/Shanghai',
+    })
+    expect(
+      parse(temporalInstantChrono.schema.config, {
+        timezone: '+09:00',
+      })
+    ).toEqual({
+      fractionalDays: false,
+      timezone: '+09:00',
+    })
+    expect(
+      parse(temporalInstantChrono.schema.config, {
+        timezone: 'Etc/GMT-9',
+      })
+    ).toEqual({
+      fractionalDays: false,
+      timezone: 'Etc/GMT-9',
+    })
+    expect(() =>
+      parse(temporalInstantChrono.schema.config, {
+        timezone: 'bad/timezone',
+      })
+    ).toThrow('Expected valid timezone')
+    expect(
+      parse(temporalInstantChrono.schema.card, {
+        dueAt: now,
+        lastReviewAt: null,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: null })
+    expect(
+      parse(temporalInstantChrono.schema.card, {
+        dueAt: now,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: null })
+    expect(
+      parse(temporalInstantChrono.schema.revlog, {
+        dueAt: now,
+        reviewTime: later,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: null, reviewTime: later })
+    expect(() =>
+      parse(temporalInstantChrono.schema.revlog, {
+        dueAt: null,
+        reviewTime: later,
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    expect(() =>
+      parse(temporalInstantChrono.schema.revlog, {
+        dueAt: later,
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    expect(() =>
+      parse(temporalInstantChrono.schema.revlog, {
+        dueAt: now,
+        reviewTime: {},
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    const normalizedTime = parse(temporalInstantChrono.normalize, {
+      card: { dueAt: later, lastReviewAt: now },
+      time: createInstant(NS_PER_DAY * 2n),
+    })
+    expect(normalizedTime.previous).toBe(now)
+    expect(normalizedTime.current).toBe(later)
+    expect(
+      parse(temporalInstantChrono.normalize, {
+        card: {
+          dueAt: now,
+          lastReviewAt: null,
+        },
+        time: later,
+      })
+    ).toEqual({ previous: null, current: now })
+    expect(
+      parse(temporalInstantChrono.normalize, {
+        card: parse(temporalInstantChrono.schema.card, {
+          dueAt: now,
+          lastReviewAt: null,
+        }),
+        time: later,
+      })
+    ).toEqual({ previous: null, current: now })
+    expect(
+      parse(temporalInstantChrono.normalize, {
+        card: parse(temporalInstantChrono.schema.card, {
+          dueAt: now,
+        }),
+        time: later,
+      })
+    ).toEqual({ previous: null, current: now })
+    expect(
+      parse(temporalInstantChrono.normalize, {
+        revlog: {
+          dueAt: later,
+          lastReviewAt: now,
+          reviewTime: createInstant(NS_PER_DAY * 2n),
+        },
+      })
+    ).toEqual({ previous: now, current: later })
+    expect(temporalInstantChrono.normalize['~standard'].validate(123)).toEqual({
+      issues: [{ message: 'Expected Temporal.Instant fields' }],
+    })
+    expect(() => parse(temporalInstantChrono.normalize, 123)).toThrow(
+      'Expected Temporal.Instant fields'
+    )
+    expect(() =>
+      parse(temporalInstantChrono.normalize, {
+        revlog: {
+          dueAt: now,
+        },
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    expect(() =>
+      parse(temporalInstantChrono.normalize, {
+        card: null,
+        time: later,
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    expect(() =>
+      parse(temporalInstantChrono.normalize, {
+        card: {
+          dueAt: now,
+          lastReviewAt: now,
+        },
+        time: {},
+      })
+    ).toThrow('Expected Temporal.Instant')
+    expect(() => parse(temporalInstantChrono.schema.card, null)).toThrow()
+    expect(() => parse(temporalInstantChrono.schema.revlog, null)).toThrow()
+    expect(() =>
+      parse(temporalInstantChrono.schema.revlog, {
+        dueAt: now,
+        lastReviewAt: {},
+        reviewTime: later,
+      })
+    ).toThrow('Expected Temporal.Instant fields')
+    expect(() =>
+      parse(temporalInstantChrono.schema.card, {
+        dueAt: {},
+        lastReviewAt: null,
+      })
+    ).toThrow()
+    expect(() =>
+      parse(temporalInstantChrono.schema.card, {
+        dueAt: now,
+        lastReviewAt: {},
+      })
+    ).toThrow()
+    expect(difference(now, later)).toBe(1)
+    expect(difference(later, later)).toBe(0)
+    expect(compare!(now, later)).toBe(-1)
+    expect(compare!(later, now)).toBe(1)
+    expect(compare!(later, later)).toBe(0)
+    const sameDayLater = createInstant(NS_PER_DAY / 4n)
+    expect(difference(now, sameDayLater)).toBe(0)
+    expect(compare!(now, sameDayLater)).toBe(-1)
+    const { difference: fractionalDifference } = temporalInstantChrono.create({
+      config: parse(temporalInstantChrono.schema.config, {
+        fractionalDays: true,
+        timezone: 'Asia/Shanghai',
+      }),
+    })
+    expect(fractionalDifference(now, later)).toBe(1.5)
+    expect(add(now, 2).epochNanoseconds).toBe(NS_PER_DAY * 2n)
+    expect(add(now, -0.25).epochNanoseconds).toBe(-NS_PER_DAY / 4n)
+    expect(add(now, 2.25).epochNanoseconds).toBe((NS_PER_DAY * 9n) / 4n)
+    const { add: addInUtc, difference: utcDifference } =
+      temporalInstantChrono.create({
+        config: parse(temporalInstantChrono.schema.config, {
+          timezone: 'UTC',
+        }),
+      })
+    expect(
+      utcDifference(
+        createInstant(-NS_PER_DAY / 4n),
+        createInstant(NS_PER_DAY / 4n)
+      )
+    ).toBe(1)
+    expect(addInUtc(now, 2).epochNanoseconds).toBe(NS_PER_DAY * 2n)
+    expect(addInUtc(now, -0.25).epochNanoseconds).toBe(-NS_PER_DAY / 4n)
+    expect(addInUtc(now, 2.25).epochNanoseconds).toBe((NS_PER_DAY * 9n) / 4n)
+    expect(
+      temporalInstantChrono.defaultValue.card!({
+        config: temporalConfig,
+        time: now,
+        previous: later,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: later })
+    expect(
+      temporalInstantChrono.defaultValue.card!({
+        config: temporalConfig,
+        time: now,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: null })
+    expect(
+      temporalInstantChrono.defaultValue.revlog!({
+        config: temporalConfig,
+        time: now,
+      })
+    ).toEqual({ dueAt: now, lastReviewAt: null, reviewTime: now })
+    const dueAt = createInstant(NS_PER_DAY / 2n)
+    const revlog = temporalInstantChrono.defaultValue.revlog!({
+      config: temporalConfig,
+      time: dueAt,
+      previous: { previous: now, current: later },
+    })
+    expect(revlog.dueAt).toBe(dueAt)
+    expect(revlog.lastReviewAt).toBe(now)
+    expect(revlog.reviewTime).toBe(later)
+  })
+})

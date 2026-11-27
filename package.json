@@ -1,0 +1,56 @@
+{
+  "name": "ts-fsrs-monorepo",
+  "version": "0.0.0",
+  "description": "ts-fsrs is a versatile package written in TypeScript that supports ES modules, CommonJS, and UMD. It implements the Free Spaced Repetition Scheduler (FSRS) algorithm, enabling developers to integrate FSRS into their flashcard applications to enhance the user learning experience.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "turbo run check",
+    "check:fix": "turbo run check:fix",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "bench": "turbo run bench",
+    "build": "turbo run build",
+    "docs:dev": "turbo run rspress:dev --filter=@ts-fsrs/website",
+    "docs:build": "turbo run rspress:build --filter=@ts-fsrs/website",
+    "docs:preview": "turbo run preview --filter=@ts-fsrs/website",
+    "changeset": "changeset",
+    "//note:naming": "Use single colon (:) instead of double colon (::) in script names. Turbo fails to parse glob expressions for cache log files when task names contain '::' (see https://github.com/vercel/turborepo/issues/6136).",
+    "//": "when we create the release PR, we need to update the lock file with the new versions",
+    "version": "changeset version && pnpm i --lockfile-only && (git stash list | grep -q '__automated-changes' && git -c advice.skippedCherryPicks=false stash pop || echo 'No stash to pop')",
+    "release": "changeset publish",
+    "test:ci": "turbo run test:ci",
+    "test:coverage:ci": "turbo run test:coverage:ci"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-istanbul": "5.1.0",
+    "turbo": "^2.11.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "workspaces": [
+    "docs",
+    "packages/*",
+    "packages/binding/npm/*"
+  ],
+  "author": "ishiko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-spaced-repetition/ts-fsrs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/open-spaced-repetition/ts-fsrs/issues"
+  },
+  "homepage": "https://github.com/open-spaced-repetition/ts-fsrs#readme",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@12.14.0+sha512.c18ba6d87993d3d164cb5e8948f32b2c06ee854487e06cd8d86781342fb3e5bb4634367034711e86802baa9c37bea906ce1929ad08d70884c97d801df13389a6"
+}

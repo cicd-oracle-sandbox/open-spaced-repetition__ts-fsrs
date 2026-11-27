@@ -1,0 +1,254 @@
+import { describe, test } from 'vitest'
+import { dateChrono } from '@/chrono/presets/date/index.js'
+import { numericChrono } from '@/chrono/presets/numeric/index.js'
+import { temporalInstantChrono } from '@/chrono/presets/temporal-instant/index.js'
+import { fractionalDaysConfigSchema } from '@/schema/fractional-days.js'
+
+const NS_PER_DAY = 86_400_000_000_000n
+const temporalImplementations = ['native', 'polyfill'] as const
+type TemporalImplementation = (typeof temporalImplementations)[number]
+
+const nodeMajor = Number(process.versions.node.split('.')[0])
+const requestedTemporalImplementation =
+  process.env.SRS_KIT_TEMPORAL_IMPLEMENTATION
+if (
+  requestedTemporalImplementation !== undefined &&
+  !temporalImplementations.includes(
+    requestedTemporalImplementation as TemporalImplementation
+  )
+) {
+  throw new Error(
+    `Unsupported Temporal benchmark implementation "${requestedTemporalImplementation}". Use "native" or "polyfill".`
+  )
+}
+
+const temporalImplementation: TemporalImplementation =
+  (requestedTemporalImplementation as TemporalImplementation | undefined) ??
+  (nodeMajor >= 26 ? 'native' : 'polyfill')
+
+function setTemporal(temporal: typeof Temporal): void {
+  Object.defineProperty(globalThis, 'Temporal', {
+    configurable: true,
+    value: temporal,
+  })
+}
+
+if (temporalImplementation === 'polyfill') {
+  // The package root delegates to native Temporal when present.
+  const { Temporal: PolyfillTemporal } = await import(
+    'temporal-polyfill/implementation'
+  )
+  setTemporal(PolyfillTemporal as typeof Temporal)
+} else if (requestedTemporalImplementation === 'native' && nodeMajor < 26) {
+  throw new Error(
+    'Native Temporal benchmarks require Node.js 26 or newer. Use SRS_KIT_TEMPORAL_IMPLEMENTATION=polyfill for the polyfill path.'
+  )
+}
+
+const activeTemporal = globalThis.Temporal
+
+function createInstant(
+  temporal: typeof Temporal,
+  epochNanoseconds: bigint
+): Temporal.Instant {
+  return temporal.Instant.fromEpochNanoseconds(epochNanoseconds)
+}
+
+describe('numericChrono preset', () => {
+  const core = numericChrono.create()
+
+  test('create', async ({ bench }) => {
+    await bench('create', () => {
+      numericChrono.create()
+    }).run()
+  })
+  test('now', async ({ bench }) => {
+    await bench('now', () => {
+      core.now()
+    }).run()
+  })
+  test('normalize', async ({ bench }) => {
+    await bench('normalize', () => {
+      numericChrono.normalize['~standard'].validate({ time: 4.5 })
+    }).run()
+  })
+  test('difference', async ({ bench }) => {
+    await bench('difference', () => {
+      core.difference(1.25, 4.75)
+    }).run()
+  })
+  test('add', async ({ bench }) => {
+    await bench('add', () => {
+      core.add(1.25, 3.5)
+    }).run()
+  })
+})
+
+describe('dateChrono preset', () => {
+  const now = new Date('2026-06-20T00:00:00.000Z')
+  const later = new Date('2026-06-21T12:00:00.000Z')
+  const config = fractionalDaysConfigSchema.parse({})
+  const core = dateChrono.create({ config })
+  const card = { dueAt: now, lastReviewAt: now }
+  const previous = { previous: now, current: later }
+
+  test('create', async ({ bench }) => {
+    await bench('create', () => {
+      dateChrono.create({ config })
+    }).run()
+  })
+  test('now', async ({ bench }) => {
+    await bench('now', () => {
+      core.now()
+    }).run()
+  })
+  test('normalize', async ({ bench }) => {
+    await bench('normalize', () => {
+      dateChrono.normalize['~standard'].validate({ card, time: later })
+    }).run()
+  })
+  test('default card', async ({ bench }) => {
+    await bench('default card', () => {
+      dateChrono.defaultValue.card?.({
+        config: { fractionalDays: false },
+        previous: later,
+        time: now,
+      })
+    }).run()
+  })
+  test('default revlog', async ({ bench }) => {
+    await bench('default revlog', () => {
+      dateChrono.defaultValue.revlog?.({
+        config: { fractionalDays: false },
+        previous,
+        time: now,
+      })
+    }).run()
+  })
+  test('difference', async ({ bench }) => {
+    await bench('difference', () => {
+      core.difference(now, later)
+    }).run()
+  })
+  test('add', async ({ bench }) => {
+    await bench('add', () => {
+      core.add(now, 2.25)
+    }).run()
+  })
+})
+
+function describeTemporalInstant(
+  label: string,
+  temporal: typeof Temporal | undefined
+): void {
+  if (!temporal) {
+    describe.skip(`temporalInstantChrono preset (${label})`)
+    return
+  }
+
+  describe(`temporalInstantChrono preset (${label})`, () => {
+    const now = createInstant(temporal, 0n)
+    const later = createInstant(temporal, (NS_PER_DAY * 3n) / 2n)
+    const rawConfig = { timezone: 'Asia/Shanghai' }
+    const rawUtcConfig = { timezone: 'UTC' }
+    const rawOffsetConfig = { timezone: '+09:00' }
+    const config = temporalInstantChrono.schema.config.parse(rawConfig)
+    const core = temporalInstantChrono.create({ config })
+    const fractionalCore = temporalInstantChrono.create({
+      config: { ...config, fractionalDays: true },
+    })
+    const utcConfig = temporalInstantChrono.schema.config.parse(rawUtcConfig)
+    const utcCore = temporalInstantChrono.create({ config: utcConfig })
+    const card = { dueAt: now, lastReviewAt: now }
+    const previous = { previous: now, current: later }
+
+    test('create', async ({ bench }) => {
+      await bench('create', () => {
+        temporalInstantChrono.create({ config })
+      }).run()
+    })
+    test('parse config', async ({ bench }) => {
+      await bench('parse config', () => {
+        temporalInstantChrono.schema.config.parse(rawConfig)
+      }).run()
+    })
+    test('parse config UTC', async ({ bench }) => {
+      await bench('parse config UTC', () => {
+        temporalInstantChrono.schema.config.parse(rawUtcConfig)
+      }).run()
+    })
+    test('parse config offset', async ({ bench }) => {
+      await bench('parse config offset', () => {
+        temporalInstantChrono.schema.config.parse(rawOffsetConfig)
+      }).run()
+    })
+    test('now', async ({ bench }) => {
+      await bench('now', () => {
+        core.now()
+      }).run()
+    })
+    test('normalize', async ({ bench }) => {
+      await bench('normalize', () => {
+        temporalInstantChrono.normalize['~standard'].validate({
+          card,
+          time: later,
+        })
+      }).run()
+    })
+    test('default card', async ({ bench }) => {
+      await bench('default card', () => {
+        temporalInstantChrono.defaultValue.card?.({
+          config,
+          previous: later,
+          time: now,
+        })
+      }).run()
+    })
+    test('default revlog', async ({ bench }) => {
+      await bench('default revlog', () => {
+        temporalInstantChrono.defaultValue.revlog?.({
+          config,
+          previous,
+          time: now,
+        })
+      }).run()
+    })
+    test('difference', async ({ bench }) => {
+      await bench('difference', () => {
+        core.difference(now, later)
+      }).run()
+    })
+    test('fractional difference', async ({ bench }) => {
+      await bench('fractional difference', () => {
+        fractionalCore.difference(now, later)
+      }).run()
+    })
+    test('add whole days', async ({ bench }) => {
+      await bench('add whole days', () => {
+        core.add(now, 2)
+      }).run()
+    })
+    test('add fractional days', async ({ bench }) => {
+      await bench('add fractional days', () => {
+        core.add(now, 2.25)
+      }).run()
+    })
+    test('difference UTC', async ({ bench }) => {
+      await bench('difference UTC', () => {
+        utcCore.difference(now, later)
+      }).run()
+    })
+    test('add whole days UTC', async ({ bench }) => {
+      await bench('add whole days UTC', () => {
+        utcCore.add(now, 2)
+      }).run()
+    })
+    test('add fractional days UTC', async ({ bench }) => {
+      await bench('add fractional days UTC', () => {
+        utcCore.add(now, 2.25)
+      }).run()
+    })
+  })
+}
+
+describeTemporalInstant(temporalImplementation, activeTemporal)

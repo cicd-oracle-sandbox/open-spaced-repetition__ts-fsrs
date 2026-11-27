@@ -1,0 +1,86 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": ["**"]
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 80,
+    "attributePosition": "auto"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useImportType": {
+          "level": "warn",
+          "fix": "safe",
+          "options": {
+            "style": "auto"
+          }
+        },
+        "noNonNullAssertion": "off",
+        "useExponentiationOperator": "off"
+      },
+      "complexity": {
+        "noStaticOnlyClass": "off"
+      }
+    },
+    "includes": ["**", "!packages/**/dist/*"]
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "es5"
+    },
+    "globals": []
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/fsrs/**",
+        "packages/srs-kit/**",
+        "!**/*.spec.ts",
+        "!**/*.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": {
+              "level": "error",
+              "options": {
+                "extensionMappings": { "ts": "js", "tsx": "js" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,567 @@
+/* Tailwind's preflight is deliberately omitted: Rspress already ships a full
+   document reset and typography, and resetting headings, lists, and borders a
+   second time breaks every prose page. Only the tokens and utilities layers
+   are imported. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Automatic detection starts from this file's directory, which would miss the
+   components and MDX pages that actually carry the class names. */
+@source "../src";
+@source "../theme";
+
+/* Rspress toggles themes with a `.dark` class rather than a media query. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Rspress owns the base palette through CSS variables, so the tokens below
+   reference them and follow the site's light/dark switch for free.
+   Blend-derived colours get their own token instead of an inline `color-mix`:
+   Tailwind's `/50` opacity syntax blends toward transparent, while these blend
+   toward another colour, and spelling that out at every call site is unreadable. */
+@theme inline {
+  --color-brand: var(--rp-c-brand);
+  --color-brand-light: var(--rp-c-brand-light);
+  --color-brand-dark: var(--rp-c-brand-dark);
+  --color-accent: var(--playground-accent);
+
+  --color-surface: var(--rp-c-bg);
+  --color-surface-soft: var(--rp-c-bg-soft);
+  --color-panel: var(--playground-panel);
+  --color-editor: var(--playground-editor);
+  --color-output: var(--playground-output);
+  --color-header: var(--playground-header);
+
+  /* Opting out of documentation typography also drops its link and inline-code
+     styling, so the elements that still need it reference the same variables. */
+  --color-link: var(--rp-c-link);
+  --color-code: var(--rp-c-text-code);
+  --color-code-bg: var(--rp-c-text-code-bg);
+
+  --color-body: var(--rp-c-text-1);
+  --color-muted: var(--rp-c-text-2);
+  --color-subtle: var(--rp-c-text-3);
+  --color-danger: #d94957;
+  --color-warning: #bd7b00;
+  --color-on-accent: var(--playground-on-accent);
+
+  /* Tints need their own tokens too. Tailwind's `/10` opacity modifier is
+     dropped when a token resolves to a `var()`, which silently produces the
+     opaque colour instead of the tint. */
+  --color-brand-soft: var(--playground-brand-soft);
+  --color-accent-soft: var(--playground-accent-soft);
+  --color-accent-muted: var(--playground-accent-muted);
+  --color-ring: var(--playground-ring);
+
+  --color-line: var(--playground-border);
+  --color-line-strong: var(--playground-border-strong);
+  --color-line-brand: var(--playground-border-brand);
+  --color-line-accent: var(--playground-border-accent);
+  --color-line-success: var(--playground-border-success);
+  --color-line-danger: var(--playground-border-danger);
+
+  --color-again: var(--landing-again);
+  --color-hard: var(--landing-hard);
+  --color-good: var(--landing-good);
+  --color-easy: var(--landing-easy);
+
+  --shadow-playground: var(--playground-shadow);
+  --shadow-primary: var(--playground-primary-shadow);
+  --shadow-dot: var(--playground-dot-shadow);
+
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  --rp-c-brand: #6254e8;
+  --rp-c-brand-light: #786af1;
+  --rp-c-brand-dark: #4d40cc;
+
+  --playground-accent: #18a999;
+  --playground-border: color-mix(in srgb, var(--rp-c-divider) 78%, transparent);
+  --playground-panel: color-mix(in srgb, var(--rp-c-bg-soft) 88%, transparent);
+  --playground-editor: #fffffe;
+  --playground-output: color-mix(in srgb, var(--rp-c-bg-soft) 70%, transparent);
+  --playground-header: color-mix(in srgb, var(--rp-c-bg-soft) 75%, transparent);
+  --playground-on-accent: color-mix(
+    in srgb,
+    var(--playground-accent) 76%,
+    var(--rp-c-text-1)
+  );
+
+  --playground-brand-soft: color-mix(
+    in srgb,
+    var(--rp-c-brand) 10%,
+    transparent
+  );
+  --playground-accent-soft: color-mix(
+    in srgb,
+    var(--playground-accent) 8%,
+    transparent
+  );
+  --playground-accent-muted: color-mix(
+    in srgb,
+    var(--playground-accent) 16%,
+    transparent
+  );
+  --playground-ring: color-mix(in srgb, var(--rp-c-brand) 30%, transparent);
+
+  --playground-border-strong: color-mix(
+    in srgb,
+    var(--rp-c-brand) 55%,
+    var(--playground-border)
+  );
+  --playground-border-brand: color-mix(
+    in srgb,
+    var(--rp-c-brand) 35%,
+    var(--playground-border)
+  );
+  --playground-border-accent: color-mix(
+    in srgb,
+    var(--playground-accent) 38%,
+    var(--playground-border)
+  );
+  --playground-border-success: color-mix(
+    in srgb,
+    var(--playground-accent) 40%,
+    var(--playground-border)
+  );
+  --playground-border-danger: color-mix(
+    in srgb,
+    #dd4a58 55%,
+    var(--playground-border)
+  );
+
+  --landing-again: #c23a48;
+  --landing-hard: #c65102;
+  --landing-good: #1f6feb;
+  --landing-easy: #17864b;
+
+  --playground-shadow: 0 24px 70px rgba(28, 25, 64, 0.12);
+  --playground-primary-shadow: 0 7px 22px
+    color-mix(in srgb, var(--rp-c-brand) 24%, transparent);
+  --playground-dot-shadow: 0 0 0 4px
+    color-mix(in srgb, var(--playground-accent) 16%, transparent);
+}
+
+.dark {
+  --landing-again: #f08a94;
+  --landing-hard: #ff9d4d;
+  --landing-good: #6fb0fa;
+  --landing-easy: #4ac97e;
+  --playground-accent: #45d2bf;
+  --playground-border: rgba(255, 255, 255, 0.12);
+  --playground-panel: rgba(255, 255, 255, 0.045);
+  --playground-editor: #1e1e1e;
+  --playground-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+/* The panel's ambient glow: two tinted corners over the page background. A
+   utility would have to inline both gradients at the call site. */
+.playground-surface {
+  background:
+    radial-gradient(
+      circle at 94% -10%,
+      color-mix(in srgb, var(--rp-c-brand) 18%, transparent),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 5% 0%,
+      color-mix(in srgb, var(--playground-accent) 13%, transparent),
+      transparent 31%
+    ),
+    var(--rp-c-bg);
+}
+
+.playground-action {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+}
+
+.playground-action::after {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: max-content;
+  max-width: min(280px, 80vw);
+  padding: 6px 8px;
+  border: 1px solid var(--playground-border);
+  border-radius: 7px;
+  background: var(--rp-c-bg-soft);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  color: var(--rp-c-text-1);
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.playground-action:hover::after,
+.playground-action:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* The JSON tree renders real elements, so the transcript's `pre-wrap` would
+   turn the whitespace between them into a blank line per field. The element
+   also carries `rp-not-doc`, which stops documentation typography from spacing
+   the viewer's nested <ul> like a prose list. */
+.playground-log--json {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.rp-codeblock:has(math[display="block"])
+  .rp-codeblock__content__scroll-container {
+  padding-block: 0.5rem;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+
+.rp-codeblock:has(math[display="block"])
+  .rp-codeblock__content__scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+.rp-codeblock:has(math[display="block"]) .rp-code-button-group {
+  display: none;
+}
+
+/* Landing page
+   ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .landing-reveal {
+      animation: landing-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 20%;
+    }
+  }
+}
+
+@keyframes landing-reveal {
+  from {
+    opacity: 0;
+    translate: 0 24px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* Build-time Shiki output. The documentation stylesheet only reaches code
+   inside prose, so the landing page's own windows repeat the essentials. */
+.landing-code pre.shiki {
+  margin: 0;
+  padding: 1rem 1.125rem;
+  /* The hero's column is narrower than the longest lines, and a snippet the
+     reader has to scroll sideways reads as broken. Wrapping keeps every line
+     visible; the indent guides below make the continuations legible. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.release-update-body code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.release-update-body pre code {
+  white-space: pre;
+}
+
+.landing-code pre.shiki code {
+  display: block;
+}
+
+.landing-code .line {
+  display: block;
+  min-height: 1lh;
+  /* A wrapped line continues under its own indentation rather than at the
+     gutter, so the shape of the code survives the wrap. */
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+
+@media (width > 1000px) {
+  .rp-home-hero .rp-home-hero__container {
+    flex: 1.05;
+  }
+
+  .rp-home-hero .rp-home-hero__image {
+    flex: 1;
+    /* A flex item is sized by its content unless told otherwise, and the code
+       window's widest line would then set the panel's width — switching tabs
+       would resize the whole card. */
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+@media (width <= 1000px) {
+  .rp-home-hero.rp-home-hero {
+    flex-direction: column;
+  }
+
+  .rp-home-hero .rp-home-hero__image {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.rp-home-hero .rp-home-hero__subtitle,
+.rp-home-hero .rp-home-hero__tagline {
+  text-wrap: balance;
+}
+
+@media (width > 1000px) {
+  .rp-home-hero .rp-home-hero__subtitle {
+    max-width: none;
+  }
+
+  html[lang="zh-CN"] .rp-home-hero__subtitle,
+  html[lang="zh-TW"] .rp-home-hero__subtitle {
+    font-size: 3.375rem;
+  }
+}
+
+.landing-entry-features .rp-home-feature {
+  margin-bottom: -10px;
+  padding-bottom: 10px;
+}
+
+.rp-button.rp-button--big {
+  padding: 0 24px;
+}
+
+@keyframes landing-swap-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes landing-swap-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+.landing-swap-in {
+  animation: landing-swap-in 420ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.landing-swap-out {
+  animation: landing-swap-out 420ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-swap-in {
+    animation: none;
+  }
+
+  .landing-swap-out {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* Every tab reserves up to 18 lines, enough to avoid most layout movement
+   without making the hero as tall as the longest example. */
+.landing-code--fixed pre.shiki {
+  /* The 4px covers the dotted underline Twoslash draws 3px below a hovered
+     token, which would otherwise overflow the last line into a scrollbar. */
+  height: calc(var(--landing-code-lines) * 1lh + 2rem + 8px);
+  overflow: auto;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .landing-stagger > * {
+      animation: landing-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 16%;
+    }
+
+    .landing-stagger > *:nth-child(2) {
+      animation-range: entry 0% cover 20%;
+    }
+
+    .landing-stagger > *:nth-child(3) {
+      animation-range: entry 0% cover 24%;
+    }
+
+    .landing-stagger > *:nth-child(4) {
+      animation-range: entry 0% cover 28%;
+    }
+
+    .landing-stagger > *:nth-child(5) {
+      animation-range: entry 0% cover 32%;
+    }
+
+    .landing-stagger > *:nth-child(6) {
+      animation-range: entry 0% cover 36%;
+    }
+  }
+}
+
+.copy-output-button .copy-output-glyph {
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+.copy-output-button .copy-output-check {
+  opacity: 0;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition:
+    opacity 120ms ease,
+    stroke-dashoffset 180ms ease;
+}
+.copy-output-button[data-status="copied"] {
+  border-color: var(--playground-border-success);
+  background: var(--playground-accent-muted);
+  color: var(--playground-on-accent);
+}
+.copy-output-button[data-status="copied"] .copy-output-glyph {
+  opacity: 0;
+}
+.copy-output-button[data-status="copied"] .copy-output-check {
+  opacity: 1;
+  stroke-dashoffset: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .copy-output-button *,
+  .copy-output-button::after {
+    transition: none;
+  }
+}
+
+.copy-output-button::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  text-transform: none;
+}
+
+.release-update {
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--rp-c-divider);
+  min-width: 0;
+}
+
+.release-update-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.release-update-heading h2 {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.release-update-heading time {
+  color: var(--rp-c-text-2);
+  font-size: 0.875rem;
+}
+
+.release-update-links {
+  margin: 0.75rem 0 1.5rem;
+  font-size: 0.875rem;
+}
+
+.release-update-links p {
+  margin: 0;
+}
+
+.release-update-body {
+  overflow-wrap: anywhere;
+}
+
+.release-update-body :is(h2, h3, h4) {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.release-updates-tabs {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin: 1.5rem 0 0;
+  border-bottom: 1px solid var(--rp-c-divider);
+}
+
+.release-updates-tabs a {
+  padding: 0.5rem 0;
+}
+
+.release-updates-tabs a[aria-current="page"] {
+  border-bottom: 2px solid var(--rp-c-brand);
+  font-weight: 600;
+}
+
+.rp-doc .release-update-heading h2::before {
+  display: none;
+}
+
+.release-update-heading > p {
+  margin: 0;
+}
+
+.release-update-links a {
+  display: inline-flex;
+  border-bottom: 1px solid transparent;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  white-space: nowrap;
+}
+
+.release-update-links a::before {
+  content: "";
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: var(--release-link-icon) center / contain no-repeat;
+}
+
+.release-update-links a[href^="https://npmx.dev/"] {
+  --release-link-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M2%207h20v10H12v2H8v-2H2z%20M5%2010v4h3v-4z%20M11%2010v7h3v-7z%20M17%2010v4h2v-4z%22%20fill%3D%22black%22%20fill-rule%3D%22evenodd%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.release-update-links a[href^="https://github.com/"] {
+  --release-link-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M9%2019c-4.3%201.4-4.3-2.5-6-3m12%206v-3.9a3.4%203.4%200%200%200-.9-2.7c3-.3%206.2-1.5%206.2-6.9a5.4%205.4%200%200%200-1.5-3.7%205%205%200%200%200-.1-3.7s-1.2-.3-3.8%201.4a13%2013%200%200%200-6.9%200C5.4-.2%204.2.1%204.2.1a5%205%200%200%200-.1%203.7%205.4%205.4%200%200%200-1.5%203.7c0%205.4%203.2%206.6%206.2%206.9a3.4%203.4%200%200%200-.9%202.7V22%22%20transform%3D%22translate%282%201%29%20scale%28.85%29%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+}
+
+/* Rspress's 320px body minimum otherwise overflows a 320px viewport
+   when the browser reserves space for a vertical scrollbar. */
+body:has(.release-updates-tabs, .release-update-links) {
+  min-width: 0;
+}

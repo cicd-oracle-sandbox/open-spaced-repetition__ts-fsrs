@@ -1,0 +1,53 @@
+---
+title: クイックスタート
+description: ts-fsrs をインストールし、DefaultScheduler で素早く導入してから、既定とカスタムのスケジューラー例を Rating.Good で実行します
+---
+
+import { PackageManagerTabs } from '@rspress/core/theme'
+import RunCode from '../../components/RunCode'
+import defaultSchedulerCode from '@/snippets/run-code/default-scheduler.ts?raw'
+import defineSchedulerCode from '@/snippets/run-code/define-scheduler.ts?raw'
+
+# クイックスタート
+
+既存アプリケーションの更新は [v5 → v6 と FSRS-7 への移行ガイド](./migration)を参照してください。
+
+## インストール
+
+`ts-fsrs` には Node.js 24 以降が必要です。
+
+<PackageManagerTabs command="install ts-fsrs" />
+
+FSRS パラメーターの学習や復習ログ CSV の変換が必要な場合にのみ、`@open-spaced-repetition/binding` を追加でインストールします。
+
+## DefaultScheduler から始める
+
+`DefaultScheduler()` は FSRS スケジューリングを最短で導入する方法です。既定で FSRS-7 を使用し、目標保持率、統計、学習ステップ、最大間隔、単調間隔、スケジュール日数の標準ポリシーを含みます。ファジングはオプションで有効にできます。
+
+```ts twoslash file="../../snippets/run-code/default-scheduler.ts"
+```
+
+<RunCode code={defaultSchedulerCode} />
+
+この例では一般的な既定値を明示しています。製品に合わせて `desiredRetention`、学習・再学習ステップ、ファジング、`maximumInterval` を変更できます。`weights` を省略すると、選択した FSRS バージョンのプリセット重みが使われます。
+
+## スケジューラーを作成する
+
+モデルや時刻体系を選ぶ場合、または middleware を自分で組み合わせる場合は `defineScheduler` を使います。再利用可能な definition を作成し、`.create()` が設定を検証して独立したスケジューラーを返します。
+
+`chrono` は、時間の表現方法、カードや復習ログへの保存方法、スケジューリング計算での扱い方を定義し、JavaScript の `Date`、Temporal、数値による時間表現を利用できるようにします。 `chrono.normalize` は `ChronoTimeNormalizer` スキーマを使い、カードや復習ログの時刻フィールドを `{ previous, current }` に変換して、スケジューリングとロールバックに使用します。
+
+```ts twoslash file="../../snippets/run-code/define-scheduler.ts"
+```
+
+<RunCode code={defineSchedulerCode} />
+
+:::note スケジューラー定義を再利用する
+`defineScheduler(...)` の結果は、`.use(...)` で組み合わせた middleware を含めて、プログラム共通のプリセットとして保持します。ユーザーやコレクションにスケジューラーが必要になった時点で `schedulerDefinition.create({ config })` を呼び出してください。呼び出すたびに設定が検証され、独立したインスタンスが返ります。
+:::
+
+コードブロックのコピーボタンは元のソースをコピーします。専用 Worker でそのまま実行することもできます。固定した `now` により出力を再現できます。
+
+- `newCard()` はスケジューラー既定のカードを作成します。
+- `review()` は新しいカードと復習ログを返し、入力カードを変更しません。
+- 再利用する definition に `.use(...)` でポリシー middleware を追加してから、ユーザーごとのスケジューラーを作成します。

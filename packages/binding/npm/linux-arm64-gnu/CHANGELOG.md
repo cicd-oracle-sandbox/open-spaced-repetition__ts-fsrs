@@ -1,0 +1,55 @@
+# @open-spaced-repetition/binding-linux-arm64-gnu
+
+## 0.6.2
+
+No changes in this release.
+
+## 0.6.1
+
+No changes in this release.
+
+## 0.6.0
+
+No changes in this release.
+
+## 0.6.0-beta.7
+
+No changes in this release.
+
+## 0.6.0-beta.6
+
+No changes in this release.
+
+## 0.6.0-beta.5
+
+No changes in this release.
+
+## 0.6.0-beta.4
+
+No changes in this release.
+
+## 0.6.0-beta.3
+
+## 0.6.0-beta.2
+
+## 0.6.0-beta.1
+
+## 0.6.0-beta.0
+
+## 0.5.0
+
+## 0.4.0
+
+## 0.3.1
+
+## 0.3.0
+
+## 0.2.1
+
+## 0.2.0
+
+## 0.1.2
+
+## 0.1.1
+
+## 0.1.0

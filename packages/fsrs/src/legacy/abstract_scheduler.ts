@@ -1,0 +1,126 @@
+import { FSRSValidationError } from '../error.js'
+import type { IFSRSModel } from '../kit/index.js'
+import { TypeConvert } from './convert.js'
+import { dateDiffInDays, Grades } from './help.js'
+import {
+  type Card,
+  type CardInput,
+  type DateInput,
+  type FSRSParameters,
+  type Grade,
+  Rating,
+  type RecordLogItem,
+  type ReviewLog,
+  State,
+} from './models.js'
+import type { StrategyMode, TStrategyHandler } from './strategies/types.js'
+import type { IPreview, IScheduler } from './types.js'
+
+/** @deprecated Use defineScheduler with an explicit model, chrono, and middleware. */
+export abstract class AbstractScheduler implements IScheduler {
+  protected last: Card
+  protected current: Card
+  protected review_time: Date
+  protected next: Map<Grade, RecordLogItem> = new Map()
+  protected model: IFSRSModel
+  protected parameters: FSRSParameters
+  protected strategies: Map<StrategyMode, TStrategyHandler> | undefined
+  protected elapsed_days: number = 0 // init
+  protected _seed?: string
+
+  /** @deprecated Use defineScheduler(...).create({ config }). */
+  constructor(
+    card: CardInput | Card,
+    now: DateInput,
+    model: IFSRSModel,
+    parameters: FSRSParameters,
+    strategies?: Map<StrategyMode, TStrategyHandler>
+  ) {
+    this.model = model
+    this.parameters = parameters
+    this.last = TypeConvert.card(card)
+    this.current = TypeConvert.card(card)
+    this.review_time = TypeConvert.time(now)
+    this.strategies = strategies
+    this.init()
+  }
+
+  protected checkGrade(grade: Grade): void {
+    if (!Number.isFinite(grade) || grade < 1 || grade > 4) {
+      throw new FSRSValidationError(`Invalid grade "${grade}",expected 1-4`)
+    }
+  }
+
+  private init() {
+    const { state, last_review } = this.current
+    let interval = 0 // card.state === State.New => 0
+    if (state !== State.New && last_review) {
+      interval = dateDiffInDays(last_review, this.review_time)
+    }
+    this.current.last_review = this.review_time
+    this.elapsed_days = interval
+    this.current.reps += 1
+
+    this._seed = `${this.review_time.getTime()}_${this.current.reps}_${
+      this.current.difficulty * this.current.stability
+    }`
+  }
+
+  /** @deprecated Use scheduler.preview({ card, now }) from the new scheduler API. */
+  public preview(): IPreview {
+    return {
+      [Rating.Again]: this.review(Rating.Again),
+      [Rating.Hard]: this.review(Rating.Hard),
+      [Rating.Good]: this.review(Rating.Good),
+      [Rating.Easy]: this.review(Rating.Easy),
+      [Symbol.iterator]: this.previewIterator.bind(this),
+    } satisfies IPreview
+  }
+
+  private *previewIterator(): IterableIterator<RecordLogItem> {
+    for (const grade of Grades) {
+      yield this.review(grade)
+    }
+  }
+
+  /** @deprecated Use scheduler.review({ card, now, grade }) from the new scheduler API. */
+  public review(grade: Grade): RecordLogItem {
+    const { state } = this.last
+    let item: RecordLogItem | undefined
+    this.checkGrade(grade)
+    switch (state) {
+      case State.New:
+        item = this.newState(grade)
+        break
+      case State.Learning:
+      case State.Relearning:
+        item = this.learningState(grade)
+        break
+      case State.Review:
+        item = this.reviewState(grade)
+        break
+    }
+    return item
+  }
+
+  protected abstract newState(grade: Grade): RecordLogItem
+
+  protected abstract learningState(grade: Grade): RecordLogItem
+
+  protected abstract reviewState(grade: Grade): RecordLogItem
+
+  protected buildLog(rating: Grade): ReviewLog {
+    const { last_review, due } = this.last
+
+    return {
+      rating: rating,
+      state: this.current.state,
+      due: last_review || due,
+      stability: this.current.stability,
+      difficulty: this.current.difficulty,
+      scheduled_days: this.current.scheduled_days,
+      learning_steps: this.current.learning_steps,
+      review: this.review_time,
+    } satisfies ReviewLog
+  }
+}

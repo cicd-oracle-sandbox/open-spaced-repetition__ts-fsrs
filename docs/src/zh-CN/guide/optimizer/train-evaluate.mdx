@@ -1,0 +1,70 @@
+---
+title: 训练与评估
+description: 沿 binding 走通复习日志流程——把 CSV 转成项、训练权重、评估拟合，并调整步骤
+---
+
+import RunCode from '../../../components/RunCode'
+import optimizerCsvCode from '@/snippets/run-code/optimizer-csv.ts?raw'
+import optimizerCardIdsCode from '@/snippets/run-code/optimizer-card-ids.ts?raw'
+
+# 训练与评估
+
+训练通过几次 binding 调用把复习历史跑完。输入是一份复习日志 CSV；输出是可直接交给 `DefaultScheduler` 或自定义 `defineScheduler` 的权重数组。
+
+示例导入 `@open-spaced-repetition/binding`。在 Node 中是原生 napi 模块；在浏览器中解析为 WASI Preview 1 的 wasm 构建（多线程说明见[训练器概览](./index)）。
+
+## 把复习日志转成项
+
+`convertCsvToFsrsItems` 读取 CSV 文本，并按卡片把各行归并为 `FSRSItem`。列如下：
+
+| 列 | 含义 |
+| --- | --- |
+| `card_id` | 卡片稳定标识。 |
+| `review_time` | 复习时间，epoch 毫秒。 |
+| `review_rating` | 评分，1 Again 到 4 Easy。 |
+| `review_duration` | 复习耗时，毫秒。 |
+| `review_state` | 复习时的卡片状态。 |
+
+传入 `nextDayStartsAt`（新一天开始的小时）以及 IANA 时区（如 `'UTC'`）或固定的 UTC 分钟偏移。对 `Uint8Array` 输入，该调用同步返回项：
+
+```ts file="../../../snippets/run-code/optimizer-csv.ts"
+```
+
+<RunCode code={optimizerCsvCode} />
+
+原来的转换函数仍返回数组。需要一次性归一化任意 CSV 卡片标识时，使用 `convertCsvToFsrsItemsWithCardIds`：它返回 `{ items, cardIds }`，流输入则返回 Promise。数值 ID 按本次转换中保留的卡片生成，与排序后的 items 逐项对齐，不是原始卡片标识。训练和直接评估复用同一组 IDs；不要混用不同转换结果中的 IDs。
+
+`computeParameters` 和 `evaluateWithTimeSeriesSplits` 接受可选的 `options.cardIds`。
+
+```ts file="../../../snippets/run-code/optimizer-card-ids.ts"
+```
+
+<RunCode code={optimizerCardIdsCode} />
+
+CSV 转换、训练、评估和调度必须选择相同的 `modelVersion`（默认 `'FSRS-7'`，也可选 `'FSRS-6'`）。将它作为 `convertCsvToFsrsItems` 的第四个参数，并传入训练和评估选项；调度时使用 `DefaultScheduler({ version: modelVersion, weights })`。FSRS-7 产生 34 个权重，按本地学习日的实际时长归一化并保留小数与同日间隔；FSRS-6 产生 21 个权重，使用整数学习日。因此同日的后续复习也可以参与 FSRS-7 训练。
+
+## 训练权重
+
+`computeParameters(items, options)` 返回包含训练权重的 `Promise<number[]>`。`enableShortTerm` 必填；`numRelearningSteps` 与 `trainingConfig` 可选，`progress` 在训练期间回报 `(current, total)`：
+
+```ts
+const weights = await computeParameters(items, {
+  modelVersion: 'FSRS-7',
+  enableShortTerm: true,
+  enableSchedPenalties: true,
+})
+```
+
+`computeParameters` 和 `evaluateWithTimeSeriesSplits` 在所有构建中都返回 Promise。原生 binding 通过后台任务执行；两个 WASI Preview 1 目标（`wasm32-wasip1` 和 `wasm32-wasip1-threads`）都在调用线程中同步计算，再将结果包装成 Promise。浏览器中应从专用 Worker 调用，避免阻塞页面；Worker 可以在进度回调中通过 `postMessage` 向页面发送进度。
+
+在两个 WASI p1 目标中，`progress(current, total)` 会在每个训练 batch 完成后同步调用；`evaluateWithTimeSeriesSplits` 则在每个 split 完成后回调。返回 `false` 会停止操作并拒绝其 Promise；回调抛出异常也会拒绝 Promise。数据不足等跳过 batch 训练的情况不会产生训练进度回调。`timeout` 是原生进度轮询间隔，单位为毫秒，并非训练超时时限；WASI p1 会忽略它。
+
+`enableSchedPenalties` 可选，默认为 `false`。设为 `true` 会在训练损失中加入 FSRS-7 的间隔增长和短间隔惩罚。它也适用于 `evaluateWithTimeSeriesSplits` 内部的训练，FSRS-6 会忽略此选项；它不改变调度公式。
+
+`trainingConfig`（epochs、batch size、seed、最大序列长度、学习率与 L2 权重）可选，缺省时用 binding 的默认值。浏览器中的 WASI 调用应在专用 Worker 内执行 `computeParameters`。[Playground](../../playground)页的训练器就在 Web Worker 里跑同一路径并实时回报进度。返回的 `weights` 数组就是传给 `DefaultScheduler({ version: modelVersion, weights })` 或 `defineScheduler` 配置、用于替换模型默认值的东西。
+
+## 评估拟合
+
+`evaluateWithTimeSeriesSplits(items, options)` 按时间切分复习历史，返回 `Promise<ModelEvaluation>`，其结果包含 `logLoss` 与 `rmseBins`，供你判断训练权重对留出复习的预测质量。`computeOptimalSteps` 更进一步：给定复习与目标保留率，推荐学习与再学习步骤的时长。
+
+安装命令与两种运行时见[训练器概览](./index)。
