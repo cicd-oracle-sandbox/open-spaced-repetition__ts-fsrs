@@ -1,4 +1,4 @@
 upstream: https://github.com/open-spaced-repetition/ts-fsrs
 commit: 3243489f5eb11874e12ae6b89ecf64fad2715c09
 license: MIT
-Unmodified snapshot except that .github/workflows was emptied.
+Unmodified snapshot except that .github/workflows was emptied and .github/dependabot.yml was removed (so Dependabot does not open PRs in the sandbox).
